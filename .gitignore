@@ -1,0 +1,20 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Data (download separately — see starter kit README)
+KuaiRand-Pure/
+kuairand-starter-kit/kuairand-starter-kit/KuaiRand-Pure/
+*.tar.gz
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,28 @@
+{
+  "best_primary": 0.6036731004714966,
+  "best_iter": 3,
+  "best_config": {
+    "k": 16,
+    "lr": 0.0002,
+    "epochs": 40,
+    "bs": 8192,
+    "patience": 8,
+    "dropout": 0.4,
+    "dnn_hidden": [
+      64,
+      32
+    ],
+    "seed": 0,
+    "model": "din",
+    "loss": "bpr"
+  },
+  "stagnant": 3,
+  "converged": true,
+  "iterations": 4,
+  "interventions": 0,
+  "tokens_used": 3711,
+  "gpu_hours": 0.0293,
+  "errors": 0,
+  "n_configs_tried": 4,
+  "elapsed_s": 126.8
+}

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run Report — Autonomous ML Research Agent</title>
+<style>
+:root { --fg:#111827; --muted:#6b7280; --bg:#ffffff; --card:#f9fafb; --line:#e5e7eb; --accent:#16a34a; }
+body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--fg); background:var(--bg); }
+.wrap { max-width:1000px; margin:0 auto; padding:32px 20px 64px; }
+h1 { font-size:22px; margin:0 0 4px; }
+.sub { color:var(--muted); margin:0 0 24px; }
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:28px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+.card .k { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.card .v { font-size:22px; font-weight:650; margin-top:2px; }
+.card .v.best { color:var(--accent); }
+h2 { font-size:16px; margin:28px 0 10px; }
+table { width:100%; border-collapse:collapse; font-size:12.5px; }
+th,td { padding:8px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+th { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+td.c { white-space:nowrap; }
+td.num { text-align:right; font-variant-numeric:tabular-nums; }
+td.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; }
+td.h { max-width:340px; }
+td.err { color:#dc2626; font-size:11px; }
+.v-new_best { color:#16a34a; font-weight:650; }
+.v-accept { color:#2563eb; }
+.v-reject { color:#9ca3af; }
+.v-error { color:#dc2626; font-weight:650; }
+footer { margin-top:32px; color:var(--muted); font-size:11px; }
+</style></head><body><div class="wrap">
+<h1>Autonomous ML Research Agent — Run Report</h1>
+<p class="sub">KuaiRand-Pure · within-user ranking · label <code>long_view</code> · primary = mean(GAUC, nDCG@5)</p>
+<div class="cards">
+<div class="card"><div class="k">Best valid primary</div><div class="v best">0.6037</div></div>
+<div class="card"><div class="k">Iterations</div><div class="v">4</div></div>
+<div class="card"><div class="k">Configs tried</div><div class="v">4</div></div>
+<div class="card"><div class="k">Tokens</div><div class="v">3,711</div></div>
+<div class="card"><div class="k">GPU-hours</div><div class="v">0.029</div></div>
+<div class="card"><div class="k">Converged</div><div class="v">yes</div></div>
+</div>
+<h2>Trajectory (valid primary vs iteration)</h2>
+<svg viewBox="0 0 900 260" width="100%" role="img"><line x1="52" y1="226.0" x2="884" y2="226.0" stroke="#e5e7eb" stroke-width="1"/><text x="46" y="230.0" text-anchor="end" font-size="10" fill="#6b7280">0.599</text><line x1="52" y1="156.7" x2="884" y2="156.7" stroke="#e5e7eb" stroke-width="1"/><text x="46" y="160.7" text-anchor="end" font-size="10" fill="#6b7280">0.602</text><line x1="52" y1="87.3" x2="884" y2="87.3" stroke="#e5e7eb" stroke-width="1"/><text x="46" y="91.3" text-anchor="end" font-size="10" fill="#6b7280">0.604</text><line x1="52" y1="18.0" x2="884" y2="18.0" stroke="#e5e7eb" stroke-width="1"/><text x="46" y="22.0" text-anchor="end" font-size="10" fill="#6b7280">0.607</text><line x1="52" y1="155.0" x2="884" y2="155.0" stroke="#f59e0b" stroke-dasharray="4,3" stroke-width="1.2"/><text x="884" y="151.0" text-anchor="end" font-size="9" fill="#d97706">baseline 0.6016</text><path d="M52.0,145.0 L329.3,100.6 L606.7,99.0 L884.0,104.8" fill="none" stroke="#374151" stroke-width="1.6"/><circle cx="52.0" cy="145.0" r="3.5" fill="#16a34a"/><circle cx="329.3" cy="100.6" r="3.5" fill="#2563eb"/><circle cx="606.7" cy="99.0" r="3.5" fill="#2563eb"/><circle cx="884.0" cy="104.8" r="3.5" fill="#9ca3af"/><text x="52.0" y="242" text-anchor="middle" font-size="9" fill="#6b7280">1</text><text x="329.3" y="242" text-anchor="middle" font-size="9" fill="#6b7280">2</text><text x="606.7" y="242" text-anchor="middle" font-size="9" fill="#6b7280">3</text><text x="884.0" y="242" text-anchor="middle" font-size="9" fill="#6b7280">4</text></svg>
+<h2>Iterations</h2>
+<table><thead><tr><th>#</th><th>Hypothesis</th><th>Config</th><th>valid</th><th>test</th><th>verdict</th><th>tok</th><th>gpu-h</th><th>error</th></tr></thead>
+<tbody><tr>
+<td class="c">1</td>
+<td class="h">Reproduce the FM baseline (pointwise BCE) as the trust anchor.</td>
+<td class="c mono">fm+bce k=16 lr=0.001</td>
+<td class="c num">0.6020</td>
+<td class="c num">0.5959</td>
+<td class="c v v-new_best">best</td>
+<td class="c num">0</td>
+<td class="c num">0.002</td>
+<td class="c err"></td>
+</tr><tr>
+<td class="c">2</td>
+<td class="h">The DIN architecture + BPR loss combination pushes the frontier. The prior sweep found din k=32 lr=3e-4 drop=0.2 was the ONE direction that broke past 0.604 valid, and BPR gave +0.001 over BCE on the FM anchor. DIN&#x27;s target-attention over the user&#x27;s interaction history exploits the strong within-user signal (imp/user med 39, p90 115), and BPR directly optimizes the pairwise ranking that GAUC/nDCG@5 reward rather than the pointwise BCE that only imperfectly aligns with ranking. Falsifiable: din+bpr at the tuned hyperparameters should beat both the FM-bce anchor (0.602) and the prior din-bce frontier (~0.604).</td>
+<td class="c mono">din+bpr k=32 lr=0.0003</td>
+<td class="c num">0.6036</td>
+<td class="c num">0.5970</td>
+<td class="c v v-accept">ok</td>
+<td class="c num">1959</td>
+<td class="c num">0.009</td>
+<td class="c err"></td>
+</tr><tr>
+<td class="c">3</td>
+<td class="h">The current best (din+bpr, k=32, lr=3e-4, drop=0.2) sits at 0.6036, just barely above the FM anchor (0.602). DIN&#x27;s target-attention runs over the user&#x27;s full impression history (imp/user med 39, p90 115), but a smaller decayed/history window could concentrate attention on the most predictive recent items. EDA shows feedback phi vs long_view is heavily dominated by is_click=0.758 (the feature DIN attends over), and watch median is 4904ms with full-watch only 0.170 — meaning the target attention should focus on which items the user *clicked into*, not the long trailing tail. A smaller k (16) with a stronger dropout to regularize the DIN attention, plus a lower learning rate for stability, specifically tests whether the benefit of DIN attention is being diluted by high-latent-dim noise. Falsifiable: din+bpr at k=16 dropout=0.4 lr=2e-4 should improve on the 0.6036 frontier by regularizing the target-attention over sparse within-user history, since the dominant is_click signal carries most of the ranking weight and needs less capacity.</td>
+<td class="c mono">din+bpr k=16 lr=0.0002</td>
+<td class="c num">0.6037</td>
+<td class="c num">0.5973</td>
+<td class="c v v-accept">ok</td>
+<td class="c num">1034</td>
+<td class="c num">0.010</td>
+<td class="c err"></td>
+</tr><tr>
+<td class="c">4</td>
+<td class="h">Current best (0.6037) is din+bpr at k=16, lr=2e-4, drop=0.4. DIN target-attention over the user&#x27;s history (imp/user med 39) concentrates on is_click (phi=0.758 vs next best 0.14) as the dominant ranking signal. EDA: long_view rate is 0.337/0.313; watch median 4904ms, full-watch only 0.170 — so click-in is by far the strongest per-impression predictor, and the model needs only modest capacity to read it. The natural next step is to sharpen this signal by lowering the latent dimension further (k=8) so the DIN attention is forced to compress to the click-dominance structure rather than spreading over noise, while keeping the BPR objective that aligned best with GAUC/nDCG@5. Falsifiable: din+bpr at k=8 (lr=2e-4, drop=0.4) should at least match and plausibly beat the 0.6037 frontier by driving the target-attention embedding to a minimal-capacity representation of the click-dominant within-user input.</td>
+<td class="c mono">din+bpr k=8 lr=0.0002</td>
+<td class="c num">0.6035</td>
+<td class="c num">0.5978</td>
+<td class="c v v-reject">—</td>
+<td class="c num">718</td>
+<td class="c num">0.009</td>
+<td class="c err"></td>
+</tr></tbody></table>
+<footer>Generated by report/render_report.py · baseline FM valid primary 0.6016 · oracle ceiling 0.8645</footer>
+</div></body></html>
