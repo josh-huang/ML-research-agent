@@ -14,7 +14,7 @@ import torch.nn.functional as F
 
 class DIN(nn.Module):
     def __init__(self, dim: int, n_fields: int, k: int = 16,
-                 hidden=(64, 32), dropout: float = 0.0):
+                 hidden=(64, 32), dropout: float = 0.0, aux_watch: bool = False):
         super().__init__()
         self.k = k
         self.other_idx = [i for i in range(n_fields) if i != 1]
@@ -23,6 +23,7 @@ class DIN(nn.Module):
         self.lin = nn.Embedding(dim, 1)
         nn.init.zeros_(self.lin.weight)
         self.b = nn.Parameter(torch.zeros(1))
+        self.aux_head = nn.Linear(k, 1) if aux_watch else None
 
         # DIN attention: score q vs h via [q, h, q-h, q*h] -> MLP -> scalar.
         self.attn = nn.Sequential(nn.Linear(4 * k, 16), nn.ReLU(), nn.Linear(16, 1))
@@ -61,3 +62,7 @@ class DIN(nn.Module):
         other = e[:, self.other_idx].reshape(x.size(0), -1)    # (B, (F-1)*k)
         deep = self.mlp(torch.cat([q, pooled, other], dim=-1)).squeeze(1)
         return wide + deep
+
+    def aux_forward(self, x: torch.Tensor) -> torch.Tensor:
+        """CWM watch-fraction head over the shared candidate embedding (mean-pooled)."""
+        return self.aux_head(self.emb(x).mean(dim=1)).squeeze(1)

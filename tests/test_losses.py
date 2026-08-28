@@ -8,7 +8,8 @@ These pin down two regressions found during development:
 import pytest
 import torch
 
-from models.losses import bce_loss, bpr_loss, listwise_softmax_loss
+from models.losses import (
+    bce_loss, bpr_loss, censored_watch_time_loss, listwise_softmax_loss)
 
 
 def test_listwise_positive_and_rank_consistent():
@@ -49,3 +50,24 @@ def test_bce_matches_reference():
     expected = -(labels * torch.log(torch.sigmoid(logits))
                  + (1 - labels) * torch.log(1 - torch.sigmoid(logits))).mean().item()
     assert bce_loss(logits, labels).item() == pytest.approx(expected, abs=1e-6)
+
+
+def test_censored_watch_time_one_sided_for_completed():
+    # Completed play (play_time == duration): over-prediction is free, under-prediction costs.
+    pt = torch.tensor([1000.0])
+    du = torch.tensor([1000.0])
+    over = censored_watch_time_loss(torch.tensor([10.0]), pt, du)   # sigmoid ~1.0
+    under = censored_watch_time_loss(torch.tensor([-10.0]), pt, du)  # sigmoid ~0.0
+    assert over.item() < 1e-3
+    assert under.item() > 0.9
+
+
+def test_censored_watch_time_symmetric_for_incomplete():
+    # Incomplete play (watch_frac 0.5): squared error is symmetric around the truth.
+    pt = torch.tensor([500.0])
+    du = torch.tensor([1000.0])
+    exact = censored_watch_time_loss(torch.tensor([0.0]), pt, du)   # sigmoid 0.5 -> 0
+    high = censored_watch_time_loss(torch.tensor([2.0]), pt, du)    # over-predict
+    low = censored_watch_time_loss(torch.tensor([-2.0]), pt, du)    # under-predict
+    assert exact.item() < 1e-4
+    assert abs(high.item() - low.item()) < 1e-4  # symmetric (both penalize)

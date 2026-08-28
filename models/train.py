@@ -23,23 +23,25 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from models.harness import evaluate  # noqa: E402
-from models.losses import bce_loss, bpr_loss, listwise_softmax_loss  # noqa: E402
+from models.losses import (  # noqa: E402
+    bce_loss, bpr_loss, censored_watch_time_loss, listwise_softmax_loss)
 from models import deepfm, din  # noqa: E402
 
 
 def make_model(config, dim, n_fields):
     name = config["model"]
     k = config.get("k", 16)
+    aux_watch = config.get("aux") == "cwm"
     if name == "fm":
-        return deepfm.FM(dim, k=k)
+        return deepfm.FM(dim, k=k, aux_watch=aux_watch)
     if name == "deepfm":
         return deepfm.DeepFM(dim, n_fields, k=k,
                              dnn_hidden=config.get("dnn_hidden", (64, 32)),
-                             dropout=config.get("dropout", 0.0))
+                             dropout=config.get("dropout", 0.0), aux_watch=aux_watch)
     if name == "din":
         return din.DIN(dim, n_fields, k=k,
                        hidden=config.get("dnn_hidden", (64, 32)),
-                       dropout=config.get("dropout", 0.0))
+                       dropout=config.get("dropout", 0.0), aux_watch=aux_watch)
     raise ValueError(f"unknown model {name!r}")
 
 
@@ -105,6 +107,8 @@ def run_experiment(data, config, verbose=True):
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr", 1e-3))
 
     loss_name = config.get("loss", "bce")
+    aux = config.get("aux")                        # None | "cwm"
+    aux_weight = float(config.get("aux_weight", 0.1))
     bs = config.get("bs", 8192)
     epochs = config.get("epochs", 40)
     patience = config.get("patience", 4)
@@ -137,6 +141,16 @@ def run_experiment(data, config, verbose=True):
                 loss = bpr_loss(logits, yb, torch.from_numpy(seg).to(device))
             else:
                 loss = listwise_softmax_loss(logits, yb, torch.from_numpy(seg).to(device))
+
+            if aux == "cwm":
+                # Censored watch-time aux task sharing the model embedding. It is a
+                # pointwise regression so it works on any batch (row- or user-grouped).
+                aux_logits = model.aux_forward(xb)
+                pt = torch.from_numpy(tr["aux"]["play_time"][idx]).to(device)
+                du = torch.from_numpy(tr["aux"]["duration"][idx]).to(device)
+                aux_loss = censored_watch_time_loss(aux_logits, pt, du)
+                loss = (loss + aux_weight * aux_loss) if loss is not None else aux_loss
+
             if loss is not None:
                 loss.backward()
                 optimizer.step()
@@ -158,10 +172,12 @@ def run_experiment(data, config, verbose=True):
 
     model.load_state_dict(best_state)
     model.eval()
+    va_scores = _predict(model, va, va["X"], device)
     te_scores = _predict(model, te, te["X"], device)
     return {
-        "valid": evaluate(va["users"], va["y"], _predict(model, va, va["X"], device)),
+        "valid": evaluate(va["users"], va["y"], va_scores),
         "test": evaluate(te["users"], te["y"], te_scores),
+        "valid_scores": va_scores,  # raw per-row valid scores (ensemble/drift)
         "test_scores": te_scores,   # raw per-row test scores (submission.csv)
         "best_valid": best,
         "epochs_run": ep,

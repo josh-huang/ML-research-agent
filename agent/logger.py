@@ -18,7 +18,8 @@ RUN_LOG_PATH = os.path.join(LOG_DIR, "run_log.jsonl")
 def log_iteration(*, iteration: int, hypothesis: str, action: dict,
                   metrics: dict | None, tokens: int, gpu_h: float,
                   errors: list[str] | None = None, verdict: str = "",
-                  duration_s: float = 0.0) -> None:
+                  duration_s: float = 0.0, recovery: str = "",
+                  lesson: str = "") -> None:
     """Append one iteration record (native types only — no numpy scalars)."""
     os.makedirs(LOG_DIR, exist_ok=True)
     record = {
@@ -32,6 +33,8 @@ def log_iteration(*, iteration: int, hypothesis: str, action: dict,
         "gpu_h": round(float(gpu_h), 6),
         "duration_s": round(float(duration_s), 2),
         "errors": list(errors or []),
+        "recovery": recovery or None,
+        "lesson": lesson or "",
     }
     with open(RUN_LOG_PATH, "a") as f:
         f.write(json.dumps(record, default=float) + "\n")

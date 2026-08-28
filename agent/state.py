@@ -96,6 +96,21 @@ class AgentState:
     def done(self) -> bool:
         return self.converged or self.budget_exhausted()
 
+    def summary(self) -> dict:
+        """Compact state snapshot for the episode preamble / tool results."""
+        return {
+            "best_primary": self.best_primary,
+            "best_iter": self.best_iter,
+            "best_config": self.best_config,
+            "stagnant": self.stagnant,
+            "converged": self.converged,
+            "iterations": self.iterations,
+            "tokens_used": self.tokens_used,
+            "gpu_hours": round(self.gpu_hours, 4),
+            "errors": self.errors,
+            "n_configs_tried": len(self.seen_configs),
+        }
+
     # -- persist ----------------------------------------------------------
     def to_dict(self) -> dict:
         return {
@@ -110,6 +125,7 @@ class AgentState:
             "gpu_hours": round(self.gpu_hours, 4),
             "errors": self.errors,
             "n_configs_tried": len(self.seen_configs),
+            "seen_configs": self.seen_configs,
             "elapsed_s": round(time.time() - self.started_at, 1),
         }
 
@@ -133,6 +149,7 @@ class AgentState:
             st.tokens_used = d.get("tokens_used", 0)
             st.gpu_hours = d.get("gpu_hours", 0.0)
             st.errors = d.get("errors", 0)
+            st.seen_configs = d.get("seen_configs", {})
             for k, v in kwargs.items():
                 setattr(st, k, v)
             return st

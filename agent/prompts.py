@@ -1,22 +1,22 @@
-"""Prompts for the agent's researcher / reflector, plus the cached system prompt.
+"""Prompts and tool schemas for the ReAct agent, plus the cached system prompt.
 
 The system prompt is *stable* across the whole run (metric scope + anchors + headroom map
-+ EDA evidence + action space), so it is markdown-cache-friendly. The volatile per-turn
-state (best-so-far, recent run-log, tried configs) rides in the user message.
++ EDA evidence + the ReAct protocol), so it is markdown-cache-friendly. The volatile
+per-episode state (best-so-far, lessons, recent run-log) rides in the user message built by
+:mod:`agent.memory`.
 """
 from __future__ import annotations
 
-import json
-
-# The model/loss action space the researcher can pick from (Phase 5 verified components).
+# The model/loss action space the agent can pick from (Phase 5 verified components).
 ACTION_SPACE = {
     "models": ["fm", "deepfm", "din"],
     "losses": ["bce", "bpr", "listwise"],
 }
 
 _SYSTEM_TEMPLATE = """\
-You are the researcher of an autonomous ML research agent competing in TikTok TechJam 2026.
-You iterate on a recommendation model over the KuaiRand-Pure dataset, one experiment per turn.
+You are a single autonomous ML research agent competing in TikTok TechJam 2026.
+You iterate on a recommendation model over the KuaiRand-Pure dataset, one experiment at a
+time, seeing each result and reflecting on it yourself.
 
 ## Task (fixed, authoritative)
 - Within-user ranking over logged impressions. Label = `long_view` (0/1).
@@ -30,34 +30,57 @@ You iterate on a recommendation model over the KuaiRand-Pure dataset, one experi
 ## What the prior sweep already established (do NOT re-try blindly)
 - loss alignment: BPR ~ +0.001 over BCE; listwise is *worse* (unstable, overfits).
 - model swap: DeepFM ~ +0.001, DIN ~ +0.002. All cluster at valid 0.602~0.604.
-- CWM soft-label (train on watch_fraction / log_play_time): *much worse* (valid ~0.56) —
-  the continuous target misaligns with the binary `long_view` metric. Dead end.
-- multi-task aux (is_click / play_time head): no gain — `long_view` already carries the
-  ranking signal; a dense near-redundant aux adds no gradient. Dead end.
+- CWM *soft-label* (replace long_view with watch_fraction as the target): *much worse*
+  (valid ~0.56) — the continuous target misaligns with the binary metric. Dead end.
+- multi-task aux on *binary* signals (is_click / is_like): no gain — near-redundant with
+  `long_view`. Dead end.
 - So `user_id x video_id` dominates; the plateau is ~0.604, gains here are <= +0.002.
 
 ## Open directions (all reachable within the action space below)
 - hyperparameter tuning of the DIN anchor (k, lr, dropout, dnn_hidden) — the one
   direction that pushed valid past 0.604 in the prior sweep (din k=32 lr=3e-4 drop=0.2).
 - model x loss combinations not yet on the frontier (din+bpr, deepfm+bpr, ...).
+- **CWM censored watch-time aux** (`aux="cwm"`, `aux_weight`): a censored-regression aux
+  head on watch_fraction (play_time/duration), sharing the main embedding. This is the
+  *untried* CWM idea — a one-sided loss for completed plays — as an *aux* task, NOT the
+  soft-label replacement that already failed. The single highest-value unexplored direction.
+
+## Method playbook (compressed; draw on these rather than re-deriving them)
+- DIN (Deep Interest Network): target-attention over the user's past video sequence. In the action space (`model=din`); current best single model.
+- DeepFM: FM pairwise term + MLP tower. In the action space; ~flat.
+- BPR / listwise: within-user ranking losses. In the action space; ~flat.
+- CWM (Counteracting Duration Bias, KDD 2024): censored watch-time regression. See open directions.
+- ESMM / MMoE / PLE: multi-task sharing. Binary-signal variants are dead here (see above); the continuous censored watch-time variant (CWM) is the live one.
+- DCN-v2 / xDeepFM / AutoInt: explicit higher-order crossing. Likely dead (capacity saturated).
 
 ## EDA evidence
 {eda}
 
-## Action space
-You propose ONE config per turn via the `propose_experiment` tool. Config fields:
+## Your workflow (ReAct: see result -> think -> act -> reflect)
+You are one persistent agent. Each "episode" you: read the injected state, optionally ground
+a hypothesis in published work via `search_arxiv` / `fetch_paper` or recall past runs via
+`read_run_log`, then run exactly ONE experiment via `run_experiment`, see its result (the
+tool returns the numbers), and finish with `finish_episode` carrying a reusable lesson.
+
+Rules:
+- Exactly one `run_experiment` per episode. It trains + evaluates immediately and returns
+  valid/test GAUC, nDCG@5 and primary — that result is your observation to reason about.
+- After seeing the result, call `finish_episode` with a concrete, falsifiable, REUSABLE
+  lesson grounded in the PRIMARY metric. Judge on primary = mean(GAUC, nDCG@5) (~0.60),
+  NOT on GAUC alone (~0.66) — that is a different, higher number.
+- The `config` you pass to `run_experiment` is the model actually run; keep it consistent
+  with your hypothesis (a CWM aux hypothesis must set `aux="cwm"`).
+- Cite specific EDA evidence or a published method in your hypothesis. Never "just try a
+  model".
+- Prefer a config materially different from what has been tried — a duplicate is refused,
+  which wastes the episode.
+
+Config fields for `run_experiment`:
 - model: {models}
 - loss: {losses}
 - k (int, embedding dim, default 16), lr (float, default 1e-3),
-- dnn_hidden (comma string, e.g. "64,32"), dropout (float, default 0.0), seed (int).
-
-Rules:
-- The action space is model/loss/hyperparameters ONLY. Your `config` must be the model
-  you actually want to run — never describe a multi-task/CWM/ensemble idea in the
-  hypothesis while proposing a plain config. Keep hypothesis and config consistent.
-- Cite specific EDA evidence in your hypothesis. Never "just try a model".
-- Prefer a config that is materially different from what has been tried.
-- One experiment, one hypothesis. Keep the hypothesis concrete and falsifiable."""
+- dnn_hidden (comma string, e.g. "64,32"), dropout (float, default 0.0), seed (int),
+- aux ("cwm" or omit for none), aux_weight (float, default 0.1; only used with aux="cwm")."""
 
 
 def build_system_prompt(eda_md: str) -> str:
@@ -67,9 +90,10 @@ def build_system_prompt(eda_md: str) -> str:
     )
 
 
-PROPOSE_TOOL = {
-    "name": "propose_experiment",
-    "description": "Propose the next training experiment with a hypothesis and a concrete config.",
+RUN_EXPERIMENT_TOOL = {
+    "name": "run_experiment",
+    "description": "Train and evaluate ONE config immediately; returns valid/test GAUC, "
+                   "nDCG@5 and primary. Exactly one call per episode.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -85,62 +109,67 @@ PROPOSE_TOOL = {
                     "dnn_hidden": {"type": "string"},
                     "dropout": {"type": "number"},
                     "seed": {"type": "integer"},
+                    "aux": {"type": "string", "enum": ["cwm"]},
+                    "aux_weight": {"type": "number"},
                 },
                 "required": ["model", "loss"],
             },
-            "reason": {"type": "string", "description": "Why this config tests the hypothesis"},
         },
         "required": ["hypothesis", "config"],
     },
 }
 
-
-def researcher_message(best: dict, recent: list[dict], tried_configs: list[dict]) -> str:
-    """Volatile per-turn context for the researcher."""
-    lines = [
-        "Current best so far:",
-        json.dumps(best, indent=2, default=float) if best else "  (none yet — reproduce the FM baseline first)",
-        "",
-        f"Configs already tried ({len(tried_configs)}):",
-        json.dumps(tried_configs, default=float),
-        "",
-        "Recent iterations (newest last):",
-    ]
-    if recent:
-        for r in recent:
-            m = r.get("metrics") or {}
-            lines.append(f"- [{r['iteration']}] {r['hypothesis']} -> "
-                         f"valid {m.get('valid', {}).get('primary', 'err')} "
-                         f"{'(error: ' + ','.join(r['errors']) + ')' if r['errors'] else ''}")
-    else:
-        lines.append("  (none)")
-    lines += ["", "Propose the next experiment via propose_experiment."]
-    return "\n".join(lines)
-
-
-def reflector_message(result: dict) -> str:
-    """Ask the reflector to interpret one experiment's outcome."""
-    return (
-        "Interpret this experiment result. Judge improvement on the PRIMARY metric only "
-        "(primary = mean of GAUC and nDCG@5, ~0.60). Do NOT confuse GAUC (~0.66) with "
-        "primary (~0.60).\n"
-        "The `config` field is the model actually run; do not assume any component that "
-        "is not in it (e.g. a multi-task/CWM head) was applied.\n"
-        + json.dumps(result, indent=2, default=float)
-        + "\n\nReturn JSON: {\"verdict\": \"accept|reject\", "
-          "\"lesson\": \"<one concrete, reusable lesson grounded in primary>\"}"
-    )
-
-
-REFLECT_TOOL = {
-    "name": "reflect",
-    "description": "Verdict + lesson after seeing an experiment result.",
+FINISH_EPISODE_TOOL = {
+    "name": "finish_episode",
+    "description": "End the episode with a reusable lesson. Judge on PRIMARY (mean of GAUC "
+                   "and nDCG@5, ~0.60), NOT GAUC alone (~0.66).",
     "input_schema": {
         "type": "object",
         "properties": {
+            "lesson": {"type": "string",
+                       "description": "Concrete, falsifiable, reusable lesson grounded in primary"},
             "verdict": {"type": "string", "enum": ["accept", "reject"]},
-            "lesson": {"type": "string"},
         },
-        "required": ["verdict", "lesson"],
+        "required": ["lesson"],
+    },
+}
+
+READ_RUN_LOG_TOOL = {
+    "name": "read_run_log",
+    "description": "Read the last n iteration records (hypothesis + valid primary + verdict "
+                   "+ lesson) for deeper recall beyond what is already in context.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "n": {"type": "integer", "description": "Number of recent records (default 5)"},
+        },
+        "required": [],
+    },
+}
+
+SEARCH_ARXIV_TOOL = {
+    "name": "search_arxiv",
+    "description": "Search arXiv for recommendation-system papers matching a query. "
+                   "Returns a compact ranked list of titles + abstracts.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string",
+                      "description": "Search query, e.g. 'censored watch time recommendation'"},
+            "max_results": {"type": "integer", "description": "Number of results (default 5)"},
+        },
+        "required": ["query"],
+    },
+}
+
+FETCH_PAPER_TOOL = {
+    "name": "fetch_paper",
+    "description": "Fetch the title and abstract of one arXiv paper by id (e.g. '2404.05870').",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "arxiv_id": {"type": "string", "description": "arXiv id, e.g. '2404.05870'"},
+        },
+        "required": ["arxiv_id"],
     },
 }

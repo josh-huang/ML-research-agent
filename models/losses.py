@@ -107,3 +107,23 @@ def bpr_loss(logits, labels, segments, num_neg=1):
     z_pos = logits[pos_rows].unsqueeze(1)           # (P, 1)
     z_neg = logits[neg_row]                         # (P, num_neg)
     return -F.logsigmoid(z_pos - z_neg).mean()
+
+
+def censored_watch_time_loss(aux_logits, play_time, duration):
+    """CWM-style censored regression on normalized watch fraction (auxiliary task).
+
+    ``play_time`` / ``duration`` are raw ms. ``watch_frac = clip(play_time/duration, 0, 1)``
+    is right-censored at 1: a completed play (``play_time >= duration``) means the observed
+    watch time was truncated by the video length, so the true fraction is >= 1 and we use a
+    one-sided loss (penalize under-prediction only) for those rows. Non-completed rows are
+    exact and get squared error. This is the censored-regression idea from CWM (KDD'24), NOT
+    the soft-label regression that already failed — here watch time is an *aux* task sharing
+    the main model's embedding, not a replacement for the binary ``long_view`` target.
+    """
+    watch_frac = torch.clamp(play_time / duration.clamp(min=1.0), 0.0, 1.0)
+    pred = torch.sigmoid(aux_logits)                # watch fraction in [0, 1]
+    complete = (play_time >= duration).float()      # 1 = censored (completed play)
+    err = watch_frac - pred
+    uncensored = (1.0 - complete) * err.square()
+    censored = complete * torch.relu(err).square()  # under-predict -> penalty, over -> 0
+    return (uncensored + censored).mean()

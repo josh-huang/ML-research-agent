@@ -14,13 +14,14 @@ import torch.nn as nn
 class FM(nn.Module):
     """Factorization Machine over the official 5-field global-offset encoding."""
 
-    def __init__(self, dim: int, k: int = 16):
+    def __init__(self, dim: int, k: int = 16, aux_watch: bool = False):
         super().__init__()
         self.V = nn.Embedding(dim, k)
         nn.init.normal_(self.V.weight, 0.0, 0.01)
         self.W = nn.Embedding(dim, 1)
         nn.init.zeros_(self.W.weight)
         self.b = nn.Parameter(torch.zeros(1))
+        self.aux_head = nn.Linear(k, 1) if aux_watch else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         e = self.V(x)                       # (B, F, k)
@@ -29,18 +30,23 @@ class FM(nn.Module):
         lin = self.W(x).sum(dim=1).squeeze(1)  # (B,)
         return self.b + lin + inter
 
+    def aux_forward(self, x: torch.Tensor) -> torch.Tensor:
+        """CWM watch-fraction head over the shared field embedding (mean-pooled)."""
+        return self.aux_head(self.V(x).mean(dim=1)).squeeze(1)
+
 
 class DeepFM(nn.Module):
     """DeepFM: FM pairwise term + DNN tower over the shared field embeddings."""
 
     def __init__(self, dim: int, n_fields: int, k: int = 16,
-                 dnn_hidden=(64, 32), dropout: float = 0.0):
+                 dnn_hidden=(64, 32), dropout: float = 0.0, aux_watch: bool = False):
         super().__init__()
         self.emb = nn.Embedding(dim, k)
         nn.init.normal_(self.emb.weight, 0.0, 0.01)
         self.lin = nn.Embedding(dim, 1)
         nn.init.zeros_(self.lin.weight)
         self.b = nn.Parameter(torch.zeros(1))
+        self.aux_head = nn.Linear(k, 1) if aux_watch else None
 
         layers = []
         in_dim = n_fields * k
@@ -61,3 +67,7 @@ class DeepFM(nn.Module):
         fm = self.b + lin + inter
         dnn = self.mlp(e.reshape(x.size(0), -1)).squeeze(1)
         return fm + dnn
+
+    def aux_forward(self, x: torch.Tensor) -> torch.Tensor:
+        """CWM watch-fraction head over the shared field embedding (mean-pooled)."""
+        return self.aux_head(self.emb(x).mean(dim=1)).squeeze(1)

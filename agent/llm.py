@@ -19,7 +19,18 @@ dotenv.load_dotenv(os.path.join(_ROOT, ".env"))
 import anthropic  # noqa: E402
 
 MODEL = "claude-sonnet-5"
-MAX_TOKENS = 2048
+MAX_TOKENS = 4096
+
+
+def usage_tokens(usage: dict) -> int:
+    """Total token volume for one call (input + output + cache-write + cache-read).
+
+    The four usage fields are disjoint and together cover every token the call moved; the
+    old ``input + output`` sum silently dropped cached tokens, undercounting a long
+    persistent conversation's real spend.
+    """
+    return (int(usage.get("input", 0)) + int(usage.get("output", 0))
+            + int(usage.get("cache_write", 0)) + int(usage.get("cache_read", 0)))
 
 
 class ClaudeClient:
@@ -46,9 +57,13 @@ class ClaudeClient:
         config / write a lesson) are cheap, so we disable thinking explicitly — it
         re-enables forced tool selection and keeps the feasibility budget tight.
         """
+        # Accept either a plain user string or a full message list (for multi-turn
+        # tool loops where the caller appends assistant tool_use + user tool_result).
+        messages = user_text if isinstance(user_text, list) else [
+            {"role": "user", "content": user_text}]
         kwargs = dict(
             model=self.model, max_tokens=MAX_TOKENS,
-            system=self.system, messages=[{"role": "user", "content": user_text}],
+            system=self.system, messages=messages,
             thinking={"type": "disabled"},
         )
         if tools:
@@ -72,6 +87,12 @@ class ClaudeClient:
             if getattr(block, "type", "") == "tool_use":
                 return block.input
         return {}
+
+    @staticmethod
+    def tool_uses(content) -> list[dict]:
+        """All tool_use blocks as ``[{'id', 'name', 'input'}]`` (multi-tool turns)."""
+        return [{"id": b.id, "name": b.name, "input": b.input}
+                for b in content if getattr(b, "type", "") == "tool_use"]
 
     @staticmethod
     def text(content) -> str:
