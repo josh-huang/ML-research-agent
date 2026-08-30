@@ -42,3 +42,35 @@ ML-research-agent/
 - 寻根究底：禁止为过测试而注释报错、用 `Any`、加 Bypass。
 - 凭证 / 密钥不入代码、不入 commit、不入日志。
 - 红线（继承全局 CLAUDE.md）：删文件/目录、改 .env/密钥、迁移 DB、git push/rebase/reset --hard、装全局系统依赖、公开发布 —— 一律先显式确认。
+
+## 提交交付物 (Deliverables)
+
+竞赛 4 类交付物，全部必须产出并映射到仓库。核心汇报口径：**对官方 baseline 的绝对 delta**（进展以 oracle 0.8645 为分母，不以 1.0 为分母）。
+
+### D1 书面项目描述（Devpost）
+- 必答：方案如何解题 / 开发工具（PyCharm + VSCode + Python）/ API（**Anthropic Claude**，Messages API）/ 库与框架（PyTorch、pandas、numpy、Streamlit、anthropic、python-dotenv）/ 数据集（KuaiRand-Pure）。
+- 产出：Devpost 文本稿（**新写**；从 README「Strategy / Key findings」提炼）。
+
+### D2 公开代码 / GitHub 仓库
+- README 必含：概览 / 安装 / 复现 / 局限与改进方向 / 团队分工。仓库 `README.md` 已覆盖前四者，**缺「团队分工」——补一句 solo participant（单人）**。
+- 代码注释齐全、结构清晰；凭证/密钥绝不入仓库（`.env` 不入 commit）。
+
+### D3 Run & Iteration Logs（每轮日志）
+- 每轮四要素，映射现状：
+  - hypothesis → `run_log.jsonl` 的 `hypothesis` 字段 ✓
+  - **code diff** → 本 Agent 每轮只改 config 不改代码，`action` 字段即 config 增量；为可复现性补一个 run 起始 `git_sha` 即可，无需逐轮 code diff（**待补**）。
+  - 指标 → `metrics`（GAUC/nDCG@5/primary）✓
+  - error/recovery → `errors` / `recovery` ✓
+- 「人工干预次数」总结 → `state.json` 的 `interventions`（交付时显式写入结果表）✓
+
+### D4 最终提交 + 结果汇总
+- 最终 `submission/final.csv`（starter-kit schema，`submit.py --check` 校验）。
+- 结果表：valid-best GAUC/nDCG@5 + 对官方 baseline 的绝对 delta → README「Result」表已有雏形，交付时刷新为最终数字。
+- 资源用量（供 Feasibility 打分）：迭代数（**50 轮 cap**，我们 ε=0.002/N=3 会提前收敛）、墙钟（`state.elapsed_s`）、GPU-hours（`state.gpu_hours`）、token **input+output 分列**（`llm.complete()` 已返回 input/output/cache 分列，但 `state` 只存总量 `tokens_used`，**交付前补 `tokens_input`/`tokens_output` 聚合**）。
+
+### 交付前待办（缺口清单）
+1. README 补「团队分工（solo）」（D2）。
+2. `run_log` 补 run 起始 `git_sha` 字段（D3「code diff」可追溯）。
+3. `state` 补 token input/output 分列聚合（D4）。
+4. 新写 D1 Devpost 描述稿。
+5. 交付时刷新 README 结果表与资源用量为最终跑的数字。
