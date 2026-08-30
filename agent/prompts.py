@@ -44,6 +44,14 @@ time, seeing each result and reflecting on it yourself.
   head on watch_fraction (play_time/duration), sharing the main embedding. This is the
   *untried* CWM idea — a one-sided loss for completed plays — as an *aux* task, NOT the
   soft-label replacement that already failed. The single highest-value unexplored direction.
+- **video side-information** (`use_videoside=true`): id-only model ignores the organizer's
+  rich video features. Adds video_type/music_type categorical + 6 continuous item-quality
+  features (play_progress, engagement rates, duration). The item-side lever — primary for
+  within-user ranking (its linear term is rank-relevant).
+- **user side-information** (`use_userside=true`): adds 5 user categorical features
+  (active_degree + follow/fans/friend/register *_range). Weaker than video-side: its linear
+  term is a per-user constant (rank-irrelevant for GAUC/nDCG@5), so it only helps through
+  cross-interactions with item fields.
 
 ## Method playbook (compressed; draw on these rather than re-deriving them)
 - DIN (Deep Interest Network): target-attention over the user's past video sequence. In the action space (`model=din`); current best single model.
@@ -80,7 +88,8 @@ Config fields for `run_experiment`:
 - loss: {losses}
 - k (int, embedding dim, default 16), lr (float, default 1e-3),
 - dnn_hidden (comma string, e.g. "64,32"), dropout (float, default 0.0), seed (int),
-- aux ("cwm" or omit for none), aux_weight (float, default 0.1; only used with aux="cwm")."""
+- aux ("cwm" or omit for none), aux_weight (float, default 0.1; only used with aux="cwm").
+- use_videoside / use_userside (bool, default false): add video-side / user-side features."""
 
 
 def build_system_prompt(eda_md: str) -> str:
@@ -111,6 +120,13 @@ RUN_EXPERIMENT_TOOL = {
                     "seed": {"type": "integer"},
                     "aux": {"type": "string", "enum": ["cwm"]},
                     "aux_weight": {"type": "number"},
+                    "use_videoside": {"type": "boolean",
+                                      "description": "Add video-side features (video_type/"
+                                      "music_type categorical + 6 continuous engagement/quality)."},
+                    "use_userside": {"type": "boolean",
+                                     "description": "Add user-side categorical features "
+                                     "(active_degree + 4 *_range). Weaker: linear term is "
+                                     "rank-irrelevant, value only via cross-interactions."},
                 },
                 "required": ["model", "loss"],
             },

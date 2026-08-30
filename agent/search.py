@@ -22,7 +22,8 @@ import random
 # `seed` is pinned here so every normalized config carries the same keys — this is
 # what makes config-dedup sound (an LLM omitting `seed` must not read as a new config).
 _DEFAULT = dict(k=16, lr=1e-3, epochs=40, bs=8192, patience=8,
-                dropout=0.0, dnn_hidden=(64, 32), seed=0, aux=None, aux_weight=0.1)
+                dropout=0.0, dnn_hidden=(64, 32), seed=0, aux=None, aux_weight=0.1,
+                use_videoside=False, use_userside=False)
 
 # (lo, hi) per hyperparameter. lr is sampled in log-space.
 _BOUNDS = {
@@ -76,6 +77,8 @@ def normalize(config: dict) -> dict:
     out["aux"] = aux if aux in ("cwm",) else None
     aw = config.get("aux_weight", 0.1)
     out["aux_weight"] = float(min(1.0, max(0.0, float(aw))))
+    out["use_videoside"] = bool(config.get("use_videoside", False))
+    out["use_userside"] = bool(config.get("use_userside", False))
     return out
 
 
@@ -83,11 +86,16 @@ def mutate(config: dict, rng: random.Random | None = None) -> dict:
     """Perturb exactly one dimension of a config (keep the rest fixed)."""
     rng = rng or random.Random()
     out = dict(config)
-    key = rng.choice(["k", "lr", "dropout", "dnn_hidden", "bs", "aux"])
+    key = rng.choice(["k", "lr", "dropout", "dnn_hidden", "bs", "aux",
+                      "use_videoside", "use_userside"])
     if key == "dnn_hidden":
         out["dnn_hidden"] = rng.choice(_DNN_HIDDEN_CHOICES)
     elif key == "aux":
         out["aux"] = "cwm" if not out.get("aux") else None
+    elif key == "use_videoside":
+        out["use_videoside"] = not bool(out.get("use_videoside"))
+    elif key == "use_userside":
+        out["use_userside"] = not bool(out.get("use_userside"))
     elif key == "lr":
         lo, hi = _BOUNDS["lr"]
         out["lr"] = round(float(math.exp(rng.uniform(math.log(lo), math.log(hi)))), 6)
@@ -110,4 +118,6 @@ def random_config(rng: random.Random | None = None) -> dict:
         "dropout": round(rng.uniform(0.0, 0.3), 2),
         "dnn_hidden": rng.choice(_DNN_HIDDEN_CHOICES),
         "seed": rng.randint(0, 4),
+        "use_videoside": rng.random() < 0.5,
+        "use_userside": rng.random() < 0.5,
     })

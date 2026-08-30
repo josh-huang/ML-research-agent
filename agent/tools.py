@@ -48,7 +48,8 @@ def run_experiment(state, data, config, hypothesis) -> tuple[str, dict | None]:
     if state.seen(cfg):
         prev = state.seen_configs[state.config_key(cfg)]
         return (f"Refusing: this config was already tried (valid primary {prev:.4f}). "
-                f"Vary a dimension (model/loss/k/lr/dropout/aux/seed) and try again. "
+                f"Vary a dimension (model/loss/k/lr/dropout/aux/seed/"
+                f"use_videoside/use_userside) and try again. "
                 f"Normalized cfg: {json.dumps(cfg, sort_keys=True, default=float)}"), None
 
     t0 = time.time()
