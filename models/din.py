@@ -14,7 +14,8 @@ import torch.nn.functional as F
 
 class DIN(nn.Module):
     def __init__(self, dim: int, n_fields: int, k: int = 16,
-                 hidden=(64, 32), dropout: float = 0.0, aux_watch: bool = False):
+                 hidden=(64, 32), dropout: float = 0.0, aux_watch: bool = False,
+                 cont_dim: int = 0):
         super().__init__()
         self.k = k
         self.other_idx = [i for i in range(n_fields) if i != 1]
@@ -29,7 +30,7 @@ class DIN(nn.Module):
         self.attn = nn.Sequential(nn.Linear(4 * k, 16), nn.ReLU(), nn.Linear(16, 1))
 
         # deep scorer input: candidate (k) + pooled history (k) + other fields (n_fields-1)*k
-        in_dim = k + k + (n_fields - 1) * k
+        in_dim = k + k + (n_fields - 1) * k + cont_dim
         layers = []
         for h in hidden:
             layers.append(nn.Linear(in_dim, h))
@@ -40,7 +41,7 @@ class DIN(nn.Module):
         layers.append(nn.Linear(in_dim, 1))
         self.mlp = nn.Sequential(*layers)
 
-    def forward(self, x: torch.Tensor, hist=None, hist_mask=None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, hist=None, hist_mask=None, cont=None) -> torch.Tensor:
         e = self.emb(x)                     # (B, F, k)
         q = e[:, 1]                         # candidate = field 1 (video_id)
         wide = self.lin(x).sum(dim=1).squeeze(1) + self.b
@@ -60,7 +61,10 @@ class DIN(nn.Module):
             pooled = torch.zeros_like(q)
 
         other = e[:, self.other_idx].reshape(x.size(0), -1)    # (B, (F-1)*k)
-        deep = self.mlp(torch.cat([q, pooled, other], dim=-1)).squeeze(1)
+        deep_in = torch.cat([q, pooled, other], dim=-1)
+        if cont is not None:
+            deep_in = torch.cat([deep_in, cont], dim=-1)
+        deep = self.mlp(deep_in).squeeze(1)
         return wide + deep
 
     def aux_forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -14,7 +14,7 @@ import torch.nn as nn
 class FM(nn.Module):
     """Factorization Machine over the official 5-field global-offset encoding."""
 
-    def __init__(self, dim: int, k: int = 16, aux_watch: bool = False):
+    def __init__(self, dim: int, k: int = 16, aux_watch: bool = False, cont_dim: int = 0):
         super().__init__()
         self.V = nn.Embedding(dim, k)
         nn.init.normal_(self.V.weight, 0.0, 0.01)
@@ -22,13 +22,17 @@ class FM(nn.Module):
         nn.init.zeros_(self.W.weight)
         self.b = nn.Parameter(torch.zeros(1))
         self.aux_head = nn.Linear(k, 1) if aux_watch else None
+        self.cont_lin = nn.Linear(cont_dim, 1, bias=False) if cont_dim > 0 else None
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cont: torch.Tensor | None = None) -> torch.Tensor:
         e = self.V(x)                       # (B, F, k)
         s = e.sum(dim=1)                    # (B, k)
         inter = 0.5 * (s.square().sum(dim=1) - e.square().sum(dim=(1, 2)))
         lin = self.W(x).sum(dim=1).squeeze(1)  # (B,)
-        return self.b + lin + inter
+        out = self.b + lin + inter
+        if cont is not None and self.cont_lin is not None:
+            out = out + self.cont_lin(cont).squeeze(1)
+        return out
 
     def aux_forward(self, x: torch.Tensor) -> torch.Tensor:
         """CWM watch-fraction head over the shared field embedding (mean-pooled)."""
@@ -39,7 +43,8 @@ class DeepFM(nn.Module):
     """DeepFM: FM pairwise term + DNN tower over the shared field embeddings."""
 
     def __init__(self, dim: int, n_fields: int, k: int = 16,
-                 dnn_hidden=(64, 32), dropout: float = 0.0, aux_watch: bool = False):
+                 dnn_hidden=(64, 32), dropout: float = 0.0, aux_watch: bool = False,
+                 cont_dim: int = 0):
         super().__init__()
         self.emb = nn.Embedding(dim, k)
         nn.init.normal_(self.emb.weight, 0.0, 0.01)
@@ -49,7 +54,7 @@ class DeepFM(nn.Module):
         self.aux_head = nn.Linear(k, 1) if aux_watch else None
 
         layers = []
-        in_dim = n_fields * k
+        in_dim = n_fields * k + cont_dim
         for h in dnn_hidden:
             layers.append(nn.Linear(in_dim, h))
             layers.append(nn.ReLU())
@@ -59,13 +64,15 @@ class DeepFM(nn.Module):
         layers.append(nn.Linear(in_dim, 1))
         self.mlp = nn.Sequential(*layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cont: torch.Tensor | None = None) -> torch.Tensor:
         e = self.emb(x)                     # (B, F, k)
         s = e.sum(dim=1)
         inter = 0.5 * (s.square().sum(dim=1) - e.square().sum(dim=(1, 2)))
         lin = self.lin(x).sum(dim=1).squeeze(1)
         fm = self.b + lin + inter
-        dnn = self.mlp(e.reshape(x.size(0), -1)).squeeze(1)
+        flat = e.reshape(x.size(0), -1)
+        dnn_in = torch.cat([flat, cont], dim=1) if cont is not None else flat
+        dnn = self.mlp(dnn_in).squeeze(1)
         return fm + dnn
 
     def aux_forward(self, x: torch.Tensor) -> torch.Tensor:
