@@ -28,20 +28,22 @@ from models.losses import (  # noqa: E402
 from models import deepfm, din  # noqa: E402
 
 
-def make_model(config, dim, n_fields):
+def make_model(config, dim, n_fields, cont_dim=0):
     name = config["model"]
     k = config.get("k", 16)
     aux_watch = config.get("aux") == "cwm"
     if name == "fm":
-        return deepfm.FM(dim, k=k, aux_watch=aux_watch)
+        return deepfm.FM(dim, k=k, aux_watch=aux_watch, cont_dim=cont_dim)
     if name == "deepfm":
         return deepfm.DeepFM(dim, n_fields, k=k,
                              dnn_hidden=config.get("dnn_hidden", (64, 32)),
-                             dropout=config.get("dropout", 0.0), aux_watch=aux_watch)
+                             dropout=config.get("dropout", 0.0), aux_watch=aux_watch,
+                             cont_dim=cont_dim)
     if name == "din":
         return din.DIN(dim, n_fields, k=k,
                        hidden=config.get("dnn_hidden", (64, 32)),
-                       dropout=config.get("dropout", 0.0), aux_watch=aux_watch)
+                       dropout=config.get("dropout", 0.0), aux_watch=aux_watch,
+                       cont_dim=cont_dim)
     raise ValueError(f"unknown model {name!r}")
 
 
@@ -76,22 +78,32 @@ def _user_batches(user_idx, target_rows):
     return batches
 
 
-def _forward(model, xb, split, idx, device):
+def _input_tensor(split, idx, device, use_videoside, use_userside):
+    xb = torch.from_numpy(split["X"][idx]).to(device)
+    if use_videoside:
+        xb = torch.cat([xb, torch.from_numpy(split["X_vside"][idx]).to(device)], dim=1)
+    if use_userside:
+        xb = torch.cat([xb, torch.from_numpy(split["X_uside"][idx]).to(device)], dim=1)
+    cont = torch.from_numpy(split["cont"][idx]).to(device) if use_videoside else None
+    return xb, cont
+
+
+def _forward(model, xb, cont, split, idx, device):
     if isinstance(model, din.DIN):
         hist = torch.from_numpy(split["hist"][idx]).to(device)
         mask = torch.from_numpy(split["hist_mask"][idx]).to(device)
-        return model(xb, hist, mask)
-    return model(xb)
+        return model(xb, hist, mask, cont)
+    return model(xb, cont)
 
 
 @torch.no_grad()
-def _predict(model, split, X, device, bs=200_000):
+def _predict(model, split, device, use_videoside, use_userside, bs=200_000):
     model.eval()
     outs = []
-    for i in range(0, len(X), bs):
+    for i in range(0, len(split["X"]), bs):
         sl = slice(i, i + bs)
-        xb = torch.from_numpy(X[sl]).to(device)
-        outs.append(_forward(model, xb, split, sl, device).cpu().numpy())
+        xb, cont = _input_tensor(split, sl, device, use_videoside, use_userside)
+        outs.append(_forward(model, xb, cont, split, sl, device).cpu().numpy())
     model.train()
     return np.concatenate(outs)
 
@@ -103,7 +115,18 @@ def run_experiment(data, config, verbose=True):
     np.random.seed(seed)
 
     dim, n_fields = data["dim"], data["n_fields"]
-    model = make_model(config, dim, n_fields).to(device)
+    use_videoside = bool(config.get("use_videoside", False))
+    use_userside = bool(config.get("use_userside", False))
+    if use_videoside:
+        dim += data["vside_dim"]
+        n_fields += data["vside_n_fields"]
+        cont_dim = data["cont_dim"]
+    else:
+        cont_dim = 0
+    if use_userside:
+        dim += data["uside_dim"]
+        n_fields += data["uside_n_fields"]
+    model = make_model(config, dim, n_fields, cont_dim=cont_dim).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr", 1e-3))
 
     loss_name = config.get("loss", "bce")
@@ -132,9 +155,9 @@ def run_experiment(data, config, verbose=True):
                 idx, seg = batch, None
             else:
                 idx, seg = batch
-            xb = torch.from_numpy(Xtr[idx]).to(device)
+            xb, cont = _input_tensor(tr, idx, device, use_videoside, use_userside)
             yb = torch.from_numpy(ytr[idx]).to(device)
-            logits = _forward(model, xb, tr, idx, device)
+            logits = _forward(model, xb, cont, tr, idx, device)
             if loss_name == "bce":
                 loss = bce_loss(logits, yb)
             elif loss_name == "bpr":
@@ -156,7 +179,7 @@ def run_experiment(data, config, verbose=True):
                 optimizer.step()
                 total += loss.item()
                 used += 1
-        vam = evaluate(va["users"], va["y"], _predict(model, va, va["X"], device))
+        vam = evaluate(va["users"], va["y"], _predict(model, va, device, use_videoside, use_userside))
         if verbose:
             print(f"  epoch {ep:2d} | loss {total / max(used, 1):.4f} | valid GAUC {vam['GAUC']:.4f} "
                   f"nDCG@5 {vam['nDCG@5']:.4f} primary {vam['primary']:.4f} | {time.time() - t0:.1f}s")
@@ -172,8 +195,8 @@ def run_experiment(data, config, verbose=True):
 
     model.load_state_dict(best_state)
     model.eval()
-    va_scores = _predict(model, va, va["X"], device)
-    te_scores = _predict(model, te, te["X"], device)
+    va_scores = _predict(model, va, device, use_videoside, use_userside)
+    te_scores = _predict(model, te, device, use_videoside, use_userside)
     return {
         "valid": evaluate(va["users"], va["y"], va_scores),
         "test": evaluate(te["users"], te["y"], te_scores),
@@ -198,6 +221,8 @@ def main():
     ap.add_argument("--dnn_hidden", type=str, default="64,32")
     ap.add_argument("--dropout", type=float, default=0.0)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--use_videoside", action="store_true")
+    ap.add_argument("--use_userside", action="store_true")
     ap.add_argument("--device", default="")
     a = ap.parse_args()
 
@@ -209,6 +234,10 @@ def main():
         "dnn_hidden": tuple(int(x) for x in a.dnn_hidden.split(",")),
         "dropout": a.dropout,
     }
+    if a.use_videoside:
+        config["use_videoside"] = True
+    if a.use_userside:
+        config["use_userside"] = True
     if a.device:
         config["device"] = a.device
     print(f"config: {config}")
