@@ -47,3 +47,41 @@ def build_video_side_table(basic_df: pd.DataFrame, stat_df: pd.DataFrame) -> pd.
 def build_user_side_table(user_df: pd.DataFrame) -> pd.DataFrame:
     """user_id-indexed categorical user-side table (pure)."""
     return user_df.set_index("user_id")[list(CAT_USER_FEATURES)]
+
+
+def encode_cat_fields(table: pd.DataFrame, cols, keys, n_train: int):
+    """Encode categorical columns ``cols`` of a key-indexed ``table`` for ``keys``.
+
+    Vocab is built from the leading ``n_train`` rows only; unseen keys (or NaN) map to
+    the field's UNK slot. Returns ``(X_cat, side_dim, n_fields)``: ``X_cat`` is
+    (N, len(cols)) int32 with global offsets (starting at 0 — the caller adds the
+    official ``dim`` when concatenating with ``X``).
+    """
+    cat = table[list(cols)].reindex(keys)
+    X = np.empty((len(keys), len(cols)), dtype=np.int32)
+    offset = 0
+    dims = []
+    for j, col in enumerate(cols):
+        train_vals = cat[col].values[:n_train]
+        vocab = {v: i for i, v in enumerate(pd.unique(train_vals))}
+        unk = len(vocab)
+        codes = cat[col].map(vocab).fillna(unk).astype(np.int32).values
+        X[:, j] = codes + offset
+        offset += len(vocab) + 1
+        dims.append(len(vocab) + 1)
+    return X, int(sum(dims)), len(cols)
+
+
+def encode_cont_fields(table: pd.DataFrame, cols, keys, n_train: int):
+    """Z-score continuous columns ``cols`` using TRAIN-only mean/std.
+
+    Returns ``(cont, cont_dim)``; ``cont`` is (N, len(cols)) float32. Unseen keys -> 0
+    before normalization; constant columns get std=1 (no division by zero).
+    """
+    raw = table[list(cols)].reindex(keys).to_numpy(dtype=np.float32)
+    raw = np.nan_to_num(raw, nan=0.0)
+    mean = raw[:n_train].mean(axis=0)
+    std = raw[:n_train].std(axis=0)
+    std = np.where(std == 0.0, 1.0, std)
+    cont = ((raw - mean) / std).astype(np.float32)
+    return cont, len(cols)
