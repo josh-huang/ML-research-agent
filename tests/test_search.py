@@ -36,3 +36,4 @@ def test_mutate_can_toggle_side():
         if m["use_userside"] != cfg["use_userside"]:
             keys.add("userside")
     assert "videoside" in keys
+    assert "userside" in keys

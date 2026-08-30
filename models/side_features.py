@@ -75,8 +75,9 @@ def encode_cat_fields(table: pd.DataFrame, cols, keys, n_train: int):
 def encode_cont_fields(table: pd.DataFrame, cols, keys, n_train: int):
     """Z-score continuous columns ``cols`` using TRAIN-only mean/std.
 
-    Returns ``(cont, cont_dim)``; ``cont`` is (N, len(cols)) float32. Unseen keys -> 0
-    before normalization; constant columns get std=1 (no division by zero).
+    Returns ``(cont, cont_dim)``; ``cont`` is (N, len(cols)) float32. Unseen keys are
+    filled with 0 in the raw value (so they normalize to ``-mean/std``); constant
+    columns get std=1 (no division by zero).
     """
     raw = table[list(cols)].reindex(keys).to_numpy(dtype=np.float32)
     raw = np.nan_to_num(raw, nan=0.0)
