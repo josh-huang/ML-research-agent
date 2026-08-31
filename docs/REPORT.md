@@ -39,7 +39,7 @@ agent's system prompt and never relaxed.
 
 ---
 
-## 3. The approach: "floor + autonomy" (保底 + 自治)
+## 3. The approach: "floor + autonomy"
 
 The competition rewards both the score *and* the autonomous agent. So the project is built in
 two layers:
@@ -186,7 +186,7 @@ categoricals enabled**.
 | valid | 0.6726 | 0.5379 | **0.6053** |
 | **test** | **0.6660** | **0.5315** | **0.5988** |
 
-**Absolute delta over the official baseline** (the competition's core reporting口径):
+**Absolute delta over the official baseline** (the competition's core reporting standard):
 
 | | official baseline | ours | **Δ** |
 |---|---|---|---|

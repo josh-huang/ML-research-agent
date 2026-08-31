@@ -24,7 +24,6 @@ ML-research-agent/
   agent/                   # 自治 Agent：main/llm/prompts/eda/executor/logger/search/state
   models/                  # PyTorch 模型脚手架：data_loader/fm_torch/deepfm/din/losses/train
   run_logs/                # 生成的逐轮 JSONL 日志 + state.json
-  report/                  # 静态 HTML run-log 报告（deliverable）
   dashboard/               # Streamlit 实时监控仪表盘
   submission/              # 最终 submission.csv
 ```
