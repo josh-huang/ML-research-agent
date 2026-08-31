@@ -1,6 +1,6 @@
 # Autonomous ML Research Agent — Project Report
 
-**TikTok TechJam 2026 · Solo submission · Josh Huang (黄葭澍)**
+**TikTok TechJam 2026**
 
 *This report is the written substitute for the project video. It walks through the problem,
 the solution, the autonomous run, the results, and what we learned.*
