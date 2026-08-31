@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 CAT_VIDEO_FEATURES = ("video_type", "music_type")
+CAT_TAG_FEATURES = ("tag",)
 CAT_USER_FEATURES = ("user_active_degree", "follow_user_num_range",
                      "fans_user_num_range", "friend_user_num_range", "register_days_range")
 CONT_FEATURES = ("play_progress", "like_rate", "comment_rate",
@@ -47,6 +48,16 @@ def build_video_side_table(basic_df: pd.DataFrame, stat_df: pd.DataFrame) -> pd.
 def build_user_side_table(user_df: pd.DataFrame) -> pd.DataFrame:
     """user_id-indexed categorical user-side table (pure)."""
     return user_df.set_index("user_id")[list(CAT_USER_FEATURES)]
+
+
+def build_tag_table(basic_df: pd.DataFrame) -> pd.DataFrame:
+    """video_id-indexed single-column tag table (raw comma string, kept as-is).
+
+    ``tag`` is a comma-separated multi-value string; we keep the whole string as ONE
+    categorical value (faithful to the probed rank-relevance, which was measured on the
+    110 unique full strings) rather than multi-hot splitting.
+    """
+    return basic_df.set_index("video_id")[["tag"]]
 
 
 def encode_cat_fields(table: pd.DataFrame, cols, keys, n_train: int):

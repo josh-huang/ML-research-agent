@@ -24,7 +24,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from agent import prompts, search, tools  # noqa: E402
+from agent import inspect, prompts, search, tools  # noqa: E402
 from agent.eda import compute_summary, render_markdown  # noqa: E402
 from agent.llm import ClaudeClient  # noqa: E402
 from agent.logger import RUN_LOG_PATH  # noqa: E402
@@ -37,7 +37,24 @@ BASELINE_HYPOTHESIS = "Reproduce the FM baseline (pointwise BCE) as the trust an
 
 TOOL_SCHEMAS = [prompts.SEARCH_ARXIV_TOOL, prompts.FETCH_PAPER_TOOL,
                 prompts.READ_RUN_LOG_TOOL, prompts.RUN_EXPERIMENT_TOOL,
-                prompts.FINISH_EPISODE_TOOL]
+                prompts.FINISH_EPISODE_TOOL, prompts.LIST_FEATURES_TOOL,
+                prompts.PROBE_FEATURE_TOOL, prompts.PROPOSE_FEATURE_TOOL]
+
+
+def _fix_stdio_encoding() -> None:
+    """Force UTF-8 on stdout/stderr.
+
+    The LLM's lessons legitimately contain non-ASCII glyphs (Δ, —, …). Under the Windows
+    console the default codec is cp1252, which cannot encode them, so ``print(lesson)``
+    raises UnicodeEncodeError — which the orchestrator misreads as an LLM failure and
+    degrades to the no-LLM proposer. Reconfiguring to UTF-8 fixes the root cause instead
+    of sanitising the lesson text (which would drop information).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
 
 
 def _propose_fallback(state: AgentState, rng: random.Random) -> tuple[str, dict]:
@@ -65,6 +82,7 @@ def _fallback_run(state: AgentState, ctx: tools.Ctx, rng: random.Random) -> bool
 
 def run(data_dir: str, max_iters: int, budget_tokens: int, budget_gpu_h: float,
         use_llm: bool = True, fresh: bool = False) -> AgentState:
+    _fix_stdio_encoding()
     from models.data_loader import load_extended  # noqa: E402  (import late: torch)
     data = load_extended(data_dir)
     eda_md = render_markdown(compute_summary(data_dir))
@@ -87,7 +105,8 @@ def run(data_dir: str, max_iters: int, budget_tokens: int, budget_gpu_h: float,
             use_llm = False
 
     rng = random.Random(0)
-    ctx = tools.Ctx(state=state, data=data)
+    inspect_ctx = inspect.build_inspect_context(data_dir)
+    ctx = tools.Ctx(state=state, data=data, inspect_ctx=inspect_ctx)
 
     # Iteration 0: reproduce the FM baseline (task requirement #1, trust anchor). Runs
     # directly through the tool handler — zero tokens, deterministic, not in the conversation.

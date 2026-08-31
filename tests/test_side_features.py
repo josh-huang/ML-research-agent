@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 
 from models.side_features import (
-    CAT_USER_FEATURES, CAT_VIDEO_FEATURES, CONT_FEATURES,
-    build_user_side_table, build_video_side_table)
+    CAT_TAG_FEATURES, CAT_USER_FEATURES, CAT_VIDEO_FEATURES, CONT_FEATURES,
+    build_tag_table, build_user_side_table, build_video_side_table)
 
 
 def _basic_df():
@@ -92,3 +92,47 @@ def test_encode_cont_fields_train_only():
     # train mean 0.7, std 0.2 -> (0.5 - 0.7)/0.2 = -1.0
     assert cont[0, 0] == pytest.approx(-1.0)
     assert cont[0, 0] == pytest.approx(cont[2, 0])   # same video -> same value
+
+
+def test_build_tag_table_columns():
+    df = pd.DataFrame({
+        "video_id": ["v1", "v2"],
+        "tag": ["39", "39,68"],
+        "video_type": ["music", "short"],
+    })
+    t = build_tag_table(df)
+    assert list(t.index) == ["v1", "v2"]
+    assert list(t.columns) == list(CAT_TAG_FEATURES)   # == ["tag"]
+    assert t.loc["v1", "tag"] == "39"
+    assert t.loc["v2", "tag"] == "39,68"
+
+
+def test_encode_tag_multivalued_is_single_value():
+    # tag is a comma-separated MULTI-VALUE string; we keep the raw string as ONE
+    # categorical value (faithful to the probed rank-relevance, no multi-hot split).
+    table = pd.DataFrame({
+        "tag": ["39", "39,68", "12,62", "39"],
+    }, index=["v1", "v2", "v3", "v4"])
+    keys = np.array(["v1", "v2", "v3", "v4", "v_new"])
+    X, tag_dim, n_fields = encode_cat_fields(table, CAT_TAG_FEATURES, keys, n_train=4)
+
+    assert X.shape == (5, 1)
+    assert n_fields == 1
+    # vocab (train-only) = {"39":0, "39,68":1, "12,62":2}; UNK = 3
+    assert X[0, 0] == 0          # "39"
+    assert X[1, 0] == 1          # "39,68" stays one value
+    assert X[2, 0] == 2          # "12,62"
+    assert X[3, 0] == 0          # repeated "39" -> same index
+    assert X[4, 0] == 3          # unseen -> UNK
+    assert tag_dim == 4          # vocab(3) + 1 UNK
+
+
+def test_encode_tag_nan_maps_to_unk():
+    table = pd.DataFrame({"tag": ["39", "39,68", np.nan]}, index=["v1", "v2", "v3"])
+    keys = np.array(["v1", "v2", "v3"])
+    X, tag_dim, n_fields = encode_cat_fields(table, CAT_TAG_FEATURES, keys, n_train=2)
+    # vocab built from train (v1,v2) only -> {"39":0, "39,68":1}; UNK = 2
+    assert X[0, 0] == 0
+    assert X[1, 0] == 1
+    assert X[2, 0] == 2          # NaN -> UNK
+    assert tag_dim == 3          # vocab(2) + 1

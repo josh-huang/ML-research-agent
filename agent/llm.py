@@ -14,12 +14,20 @@ import sys
 import dotenv
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-dotenv.load_dotenv(os.path.join(_ROOT, ".env"))
+# Read-only parse (no os.environ mutation): dotenv.load_dotenv defaults to
+# override=False, so an already-set env var would silently win. We want the
+# .env key verbatim, and only the .env key.
+_ENV = dotenv.dotenv_values(os.path.join(_ROOT, ".env"))
 
 import anthropic  # noqa: E402
 
 MODEL = "claude-sonnet-5"
 MAX_TOKENS = 4096
+# Pin the real Anthropic endpoint. The Claude Code / editor environment injects
+# ANTHROPIC_BASE_URL (a DeepSeek gateway) and ANTHROPIC_AUTH_TOKEN; the SDK
+# would otherwise prefer those and route this agent off the user's own
+# Anthropic account. Passing api_key + base_url explicitly overrides that.
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 
 
 def usage_tokens(usage: dict) -> int:
@@ -33,12 +41,34 @@ def usage_tokens(usage: dict) -> int:
             + int(usage.get("cache_write", 0)) + int(usage.get("cache_read", 0)))
 
 
+def usage_inout(usage: dict) -> tuple[int, int]:
+    """(input-side, output) token split for one call, for the D4 resource split.
+
+    input-side = input + cache-write + cache-read (everything the model read);
+    output = generated tokens. ``sum(usage_inout(u)) == usage_tokens(u)``, so the
+    existing total accounting is unchanged.
+    """
+    inp = (int(usage.get("input", 0)) + int(usage.get("cache_write", 0))
+           + int(usage.get("cache_read", 0)))
+    return inp, int(usage.get("output", 0))
+
+
 class ClaudeClient:
     def __init__(self, model: str = MODEL):
-        if not os.environ.get("ANTHROPIC_API_KEY"):
+        api_key = (_ENV or {}).get("ANTHROPIC_API_KEY")
+        if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY not set — check .env")
         self.model = model
-        self.client = anthropic.Anthropic()
+        # Explicit api_key + base_url (not the SDK's env fallback): see the
+        # ANTHROPIC_BASE_URL note above — this keeps the agent on the user's
+        # own Anthropic account instead of the injected DeepSeek gateway.
+        workspace_id = (_ENV or {}).get("ANTHROPIC_WORKSPACE_ID")
+        self.client = anthropic.Anthropic(
+            api_key=api_key,
+            base_url=ANTHROPIC_BASE_URL,
+            default_headers=({"anthropic-workspace-id": workspace_id}
+                             if workspace_id else None),
+        )
         self.system: list[dict] = []
 
     def set_system(self, text: str) -> None:

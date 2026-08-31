@@ -19,7 +19,7 @@ import json
 import time
 from dataclasses import dataclass
 
-from agent import research, search
+from agent import inspect, memory, research, search
 from agent.executor import degrade_config, execute
 from agent.logger import log_iteration, tail
 
@@ -31,6 +31,7 @@ class Ctx:
     """Per-run context threaded through the tool handlers."""
     state: "AgentState"
     data: dict
+    inspect_ctx: object | None = None  # lazily-loaded tables for the probe tools
     episode_runs: int = 0
     run_record: dict | None = None
     lesson: str = ""
@@ -49,7 +50,7 @@ def run_experiment(state, data, config, hypothesis) -> tuple[str, dict | None]:
         prev = state.seen_configs[state.config_key(cfg)]
         return (f"Refusing: this config was already tried (valid primary {prev:.4f}). "
                 f"Vary a dimension (model/loss/k/lr/dropout/aux/seed/"
-                f"use_videoside/use_userside) and try again. "
+                f"use_videoside/use_userside/use_tagside) and try again. "
                 f"Normalized cfg: {json.dumps(cfg, sort_keys=True, default=float)}"), None
 
     t0 = time.time()
@@ -94,7 +95,8 @@ def run_experiment(state, data, config, hypothesis) -> tuple[str, dict | None]:
     return "\n".join(lines), run_record
 
 
-def finalize_run(state, run_record: dict, tokens: int, lesson: str):
+def finalize_run(state, run_record: dict, tokens: int, lesson: str,
+                 tokens_in: int = 0, tokens_out: int = 0):
     """Record + log + persist one executed experiment (exactly once per run).
 
     Returns ``(verdict, valid_primary, test_primary)``. This is where convergence counting
@@ -106,12 +108,16 @@ def finalize_run(state, run_record: dict, tokens: int, lesson: str):
     valid_primary = metrics["valid"]["primary"] if metrics else 0.0
     test_primary = metrics["test"]["primary"] if metrics else 0.0
     verdict = state.record(run_record["cfg"], valid_primary, test_primary, tokens,
-                           run_record["gpu_h"], error=bool(error))
+                           run_record["gpu_h"], error=bool(error),
+                           tokens_input=tokens_in, tokens_output=tokens_out)
     log_iteration(iteration=state.iterations, hypothesis=run_record["hypothesis"],
                   action=run_record["cfg"], metrics=metrics, tokens=tokens,
                   gpu_h=run_record["gpu_h"], errors=[error] if error else [],
                   verdict=verdict, duration_s=run_record["dur"],
-                  recovery=run_record["recovery"], lesson=lesson)
+                  recovery=run_record["recovery"], lesson=lesson,
+                  tokens_input=tokens_in, tokens_output=tokens_out)
+    if lesson:
+        memory.append_lesson(lesson)
     state.save()
 
     cfg = run_record["cfg"]
@@ -168,6 +174,12 @@ def dispatch(name: str, inp: dict, ctx: Ctx) -> str:
             return research.fetch_paper(str(inp.get("arxiv_id", "")))
         if name == "read_run_log":
             return _read_run_log(int(inp.get("n", 5)))
+        if name == "list_features":
+            return inspect.list_features()
+        if name == "probe_feature":
+            return inspect.probe_feature(ctx.inspect_ctx, str(inp.get("field", "")))
+        if name == "propose_feature":
+            return inspect.propose_feature(ctx.inspect_ctx, str(inp.get("name", "")))
         if name == "run_experiment":
             return _guarded_run(ctx, inp)
         if name == "finish_episode":

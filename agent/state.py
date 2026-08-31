@@ -10,11 +10,14 @@ import json
 import os
 import time
 
-from agent.logger import LOG_DIR
+from agent.logger import LOG_DIR, git_sha
 
 STATE_PATH = os.path.join(LOG_DIR, "state.json")
 
-# convergence: declare done when N consecutive iterations improve valid primary by < eps.
+# convergence FLAG: set when N consecutive iterations improve valid primary by < eps.
+# EPS/N are the locked competition口径 (ε=0.002, N=3) — do NOT change. The flag is for
+# REPORTING only; it does not stop the loop (AgentState.done stops on budget only, so the
+# agent keeps exploring past first-convergence up to max_iters).
 EPS = 0.002
 N_CONVERGE = 3
 
@@ -32,6 +35,9 @@ class AgentState:
         self.iterations = 0
         self.interventions = 0       # human interventions (autonomy score)
         self.tokens_used = 0
+        self.tokens_input = 0        # input-side tokens (input + cache-write + cache-read)
+        self.tokens_output = 0       # generated tokens
+        self.git_sha = git_sha()     # run-start code commit (D3 traceability)
         self.gpu_hours = 0.0
         self.seen_configs = {}       # config-key -> best primary (dedup cache)
         self.budget_tokens = budget_tokens
@@ -51,7 +57,8 @@ class AgentState:
 
     # -- update -----------------------------------------------------------
     def record(self, config: dict, valid_primary: float, test_primary: float,
-               tokens: int, gpu_h: float, error: bool = False) -> str:
+               tokens: int, gpu_h: float, error: bool = False,
+               tokens_input: int = 0, tokens_output: int = 0) -> str:
         """Record an iteration; returns 'error' | 'new_best' | 'accept' | 'reject'.
 
         Best-tracking is decoupled from convergence: *any* positive delta updates the
@@ -61,6 +68,8 @@ class AgentState:
         """
         self.iterations += 1
         self.tokens_used += tokens
+        self.tokens_input += tokens_input
+        self.tokens_output += tokens_output
         self.gpu_hours += gpu_h
         if error:
             self.errors += 1
@@ -94,7 +103,10 @@ class AgentState:
         return False
 
     def done(self) -> bool:
-        return self.converged or self.budget_exhausted()
+        # Stop on budget only. `converged` is a REPORT flag (EPS/N locked above), not a
+        # stop: the loop keeps exploring past first-convergence up to max_iters, which is
+        # how the agent reaches the playbook's named-but-untried directions.
+        return self.budget_exhausted()
 
     def summary(self) -> dict:
         """Compact state snapshot for the episode preamble / tool results."""
@@ -106,6 +118,8 @@ class AgentState:
             "converged": self.converged,
             "iterations": self.iterations,
             "tokens_used": self.tokens_used,
+            "tokens_input": self.tokens_input,
+            "tokens_output": self.tokens_output,
             "gpu_hours": round(self.gpu_hours, 4),
             "errors": self.errors,
             "n_configs_tried": len(self.seen_configs),
@@ -121,7 +135,10 @@ class AgentState:
             "converged": self.converged,
             "iterations": self.iterations,
             "interventions": self.interventions,
+            "git_sha": self.git_sha,
             "tokens_used": self.tokens_used,
+            "tokens_input": self.tokens_input,
+            "tokens_output": self.tokens_output,
             "gpu_hours": round(self.gpu_hours, 4),
             "errors": self.errors,
             "n_configs_tried": len(self.seen_configs),
@@ -147,6 +164,9 @@ class AgentState:
             st.converged = d.get("converged", False)
             st.iterations = d.get("iterations", 0)
             st.tokens_used = d.get("tokens_used", 0)
+            st.tokens_input = d.get("tokens_input", 0)
+            st.tokens_output = d.get("tokens_output", 0)
+            st.git_sha = d.get("git_sha", st.git_sha)
             st.gpu_hours = d.get("gpu_hours", 0.0)
             st.errors = d.get("errors", 0)
             st.seen_configs = d.get("seen_configs", {})

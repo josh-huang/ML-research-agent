@@ -78,7 +78,8 @@ def _user_batches(user_idx, target_rows):
     return batches
 
 
-def _input_tensor(split, idx, device, use_videoside, use_userside, dim0, vside_dim, uside_dim):
+def _input_tensor(split, idx, device, use_videoside, use_userside, use_tagside,
+                  dim0, vside_dim, uside_dim, tag_dim):
     xb = torch.from_numpy(split["X"][idx]).to(device)
     offset = dim0
     if use_videoside:
@@ -86,6 +87,10 @@ def _input_tensor(split, idx, device, use_videoside, use_userside, dim0, vside_d
         offset += vside_dim
     if use_userside:
         xb = torch.cat([xb, torch.from_numpy(split["X_uside"][idx]).to(device) + offset], dim=1)
+        offset += uside_dim
+    if use_tagside:
+        xb = torch.cat([xb, torch.from_numpy(split["X_tag"][idx]).to(device) + offset], dim=1)
+        offset += tag_dim
     cont = torch.from_numpy(split["cont"][idx]).to(device) if use_videoside else None
     return xb, cont
 
@@ -99,12 +104,14 @@ def _forward(model, xb, cont, split, idx, device):
 
 
 @torch.no_grad()
-def _predict(model, split, device, use_videoside, use_userside, dim0, vside_dim, uside_dim, bs=200_000):
+def _predict(model, split, device, use_videoside, use_userside, use_tagside,
+             dim0, vside_dim, uside_dim, tag_dim, bs=200_000):
     model.eval()
     outs = []
     for i in range(0, len(split["X"]), bs):
         sl = slice(i, i + bs)
-        xb, cont = _input_tensor(split, sl, device, use_videoside, use_userside, dim0, vside_dim, uside_dim)
+        xb, cont = _input_tensor(split, sl, device, use_videoside, use_userside,
+                                 use_tagside, dim0, vside_dim, uside_dim, tag_dim)
         outs.append(_forward(model, xb, cont, split, sl, device).cpu().numpy())
     model.train()
     return np.concatenate(outs)
@@ -120,6 +127,7 @@ def run_experiment(data, config, verbose=True):
     dim0 = data["dim"]
     use_videoside = bool(config.get("use_videoside", False))
     use_userside = bool(config.get("use_userside", False))
+    use_tagside = bool(config.get("use_tagside", False))
     if use_videoside:
         dim += data["vside_dim"]
         n_fields += data["vside_n_fields"]
@@ -129,6 +137,9 @@ def run_experiment(data, config, verbose=True):
     if use_userside:
         dim += data["uside_dim"]
         n_fields += data["uside_n_fields"]
+    if use_tagside:
+        dim += data["tag_dim"]
+        n_fields += data["tag_n_fields"]
     model = make_model(config, dim, n_fields, cont_dim=cont_dim).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.get("lr", 1e-3))
 
@@ -158,7 +169,8 @@ def run_experiment(data, config, verbose=True):
                 idx, seg = batch, None
             else:
                 idx, seg = batch
-            xb, cont = _input_tensor(tr, idx, device, use_videoside, use_userside, dim0, data["vside_dim"], data["uside_dim"])
+            xb, cont = _input_tensor(tr, idx, device, use_videoside, use_userside, use_tagside,
+                                     dim0, data["vside_dim"], data["uside_dim"], data["tag_dim"])
             yb = torch.from_numpy(ytr[idx]).to(device)
             logits = _forward(model, xb, cont, tr, idx, device)
             if loss_name == "bce":
@@ -182,7 +194,8 @@ def run_experiment(data, config, verbose=True):
                 optimizer.step()
                 total += loss.item()
                 used += 1
-        vam = evaluate(va["users"], va["y"], _predict(model, va, device, use_videoside, use_userside, dim0, data["vside_dim"], data["uside_dim"]))
+        vam = evaluate(va["users"], va["y"], _predict(model, va, device, use_videoside, use_userside,
+                                                      use_tagside, dim0, data["vside_dim"], data["uside_dim"], data["tag_dim"]))
         if verbose:
             print(f"  epoch {ep:2d} | loss {total / max(used, 1):.4f} | valid GAUC {vam['GAUC']:.4f} "
                   f"nDCG@5 {vam['nDCG@5']:.4f} primary {vam['primary']:.4f} | {time.time() - t0:.1f}s")
@@ -198,8 +211,10 @@ def run_experiment(data, config, verbose=True):
 
     model.load_state_dict(best_state)
     model.eval()
-    va_scores = _predict(model, va, device, use_videoside, use_userside, dim0, data["vside_dim"], data["uside_dim"])
-    te_scores = _predict(model, te, device, use_videoside, use_userside, dim0, data["vside_dim"], data["uside_dim"])
+    va_scores = _predict(model, va, device, use_videoside, use_userside, use_tagside,
+                         dim0, data["vside_dim"], data["uside_dim"], data["tag_dim"])
+    te_scores = _predict(model, te, device, use_videoside, use_userside, use_tagside,
+                         dim0, data["vside_dim"], data["uside_dim"], data["tag_dim"])
     return {
         "valid": evaluate(va["users"], va["y"], va_scores),
         "test": evaluate(te["users"], te["y"], te_scores),
@@ -226,6 +241,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--use_videoside", action="store_true")
     ap.add_argument("--use_userside", action="store_true")
+    ap.add_argument("--use_tagside", action="store_true")
     ap.add_argument("--device", default="")
     a = ap.parse_args()
 
@@ -241,6 +257,8 @@ def main():
         config["use_videoside"] = True
     if a.use_userside:
         config["use_userside"] = True
+    if a.use_tagside:
+        config["use_tagside"] = True
     if a.device:
         config["device"] = a.device
     print(f"config: {config}")

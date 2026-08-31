@@ -52,6 +52,10 @@ time, seeing each result and reflecting on it yourself.
   (active_degree + follow/fans/friend/register *_range). Weaker than video-side: its linear
   term is a per-user constant (rank-irrelevant for GAUC/nDCG@5), so it only helps through
   cross-interactions with item fields.
+- **`tag` content category** (`use_tagside=true`): NOW wired into the action space as an
+  extra item-content categorical (110 values, rank-relevance 0.954, long_view spread 0.527)
+  — the single highest-leverage un-encoded signal the probes surfaced. Prefer stacking it
+  onto the DIN+CWM+videoside anchor; ablate it against `use_videoside`.
 
 ## Method playbook (compressed; draw on these rather than re-deriving them)
 - DIN (Deep Interest Network): target-attention over the user's past video sequence. In the action space (`model=din`); current best single model.
@@ -63,6 +67,24 @@ time, seeing each result and reflecting on it yourself.
 
 ## EDA evidence
 {eda}
+
+## Explore NEW signals before re-tuning (the plateau breaker)
+The config space is exhausted at valid ~0.6053 (DIN+CWM+videoside+BCE). The only way past it is a
+genuinely new signal source. Three read-only tools expose the raw data's un-encoded signals:
+- `list_features`: the catalog of un-encoded fields (video upload_type/tag/server_*, user
+  register_days/is_*/onehot_feat*, log hourmin/profile_stay_time, ...) vs already-encoded ones.
+- `probe_feature(field)`: coverage, distribution, correlation with long_view, and
+  **rank-relevance** = within-user variance / total variance (0..1). LOW rank-relevance means the
+  field is a per-user constant that cannot reorder a user's own list (rank-irrelevant for
+  GAUC/nDCG@5). HIGH means it varies across a user's items and can shift within-user ranking.
+- `propose_feature(name)`: compute a whitelisted *derived* feature over the user's history
+  (hist_len, hist_density, hist_pos_rate, hist_click_rate, time_since_last, hour_sin/cos,
+  log_duration) and report the same diagnostics.
+Strict leakage口径: all *_cnt / *_user_num aggregates, plus play_duration / counts /
+play_time_ms, are refused. When you find a HIGH-rank-relevance un-encoded signal,
+probe it, cite its rank-relevance + correlation in your hypothesis, and record it in the lesson
+as a candidate to wire into the model (it is NOT yet in the action space — you cannot pass it to
+run_experiment).
 
 ## Your workflow (ReAct: see result -> think -> act -> reflect)
 You are one persistent agent. Each "episode" you: read the injected state, optionally ground
@@ -89,7 +111,9 @@ Config fields for `run_experiment`:
 - k (int, embedding dim, default 16), lr (float, default 1e-3),
 - dnn_hidden (comma string, e.g. "64,32"), dropout (float, default 0.0), seed (int),
 - aux ("cwm" or omit for none), aux_weight (float, default 0.1; only used with aux="cwm").
-- use_videoside / use_userside (bool, default false): add video-side / user-side features."""
+- use_videoside / use_userside (bool, default false): add video-side / user-side features.
+- use_tagside (bool, default false): add `tag` (110-value content category) as an extra
+  item-content categorical — the highest rank-relevance (0.954) un-encoded signal."""
 
 
 def build_system_prompt(eda_md: str) -> str:
@@ -127,6 +151,10 @@ RUN_EXPERIMENT_TOOL = {
                                      "description": "Add user-side categorical features "
                                      "(active_degree + 4 *_range). Weaker: linear term is "
                                      "rank-irrelevant, value only via cross-interactions."},
+                    "use_tagside": {"type": "boolean",
+                                    "description": "Add `tag` (110-value content category, "
+                                    "rank-relevance 0.954) as an extra item-content "
+                                    "categorical. Ablate against use_videoside."},
                 },
                 "required": ["model", "loss"],
             },
@@ -187,5 +215,40 @@ FETCH_PAPER_TOOL = {
             "arxiv_id": {"type": "string", "description": "arXiv id, e.g. '2404.05870'"},
         },
         "required": ["arxiv_id"],
+    },
+}
+
+LIST_FEATURES_TOOL = {
+    "name": "list_features",
+    "description": "List un-encoded raw-data signals (video/user/log) not yet in the model, "
+                   "vs already-encoded ones, plus the leakage blacklist. Zero-cost read.",
+    "input_schema": {"type": "object", "properties": {}, "required": []},
+}
+
+PROBE_FEATURE_TOOL = {
+    "name": "probe_feature",
+    "description": "Probe one field: coverage, distribution, correlation with long_view, and "
+                   "rank-relevance (within-user variance / total variance). Leakage fields are refused.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "field": {"type": "string", "description": "Field name from list_features"},
+        },
+        "required": ["field"],
+    },
+}
+
+PROPOSE_FEATURE_TOOL = {
+    "name": "propose_feature",
+    "description": "Compute a whitelisted derived feature over the user's history and report "
+                   "its correlation + rank-relevance. No model training.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string",
+                     "enum": ["hist_len", "hist_density", "hist_pos_rate", "hist_click_rate",
+                              "time_since_last", "hour_sin", "hour_cos", "log_duration"]},
+        },
+        "required": ["name"],
     },
 }

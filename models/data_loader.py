@@ -116,8 +116,8 @@ def load_extended(data_dir: str, K: int = 50) -> dict:
     hist_all, mask_all = _build_history(df_all, gvid_all, K)
 
     from models.side_features import (  # noqa: E402
-        CAT_USER_FEATURES, CAT_VIDEO_FEATURES, CONT_FEATURES,
-        build_user_side_table, build_video_side_table,
+        CAT_TAG_FEATURES, CAT_USER_FEATURES, CAT_VIDEO_FEATURES, CONT_FEATURES,
+        build_tag_table, build_user_side_table, build_video_side_table,
         encode_cat_fields, encode_cont_fields)
     basic = pd.read_csv(os.path.join(data_dir, "video_features_basic_pure.csv"))
     stat = pd.read_csv(os.path.join(data_dir, "video_features_statistic_pure.csv"))
@@ -130,10 +130,14 @@ def load_extended(data_dir: str, K: int = 50) -> dict:
         vside, CONT_FEATURES, df_all["video_id"].values, n_train)
     X_uside, uside_dim, uside_n_fields = encode_cat_fields(
         uside, CAT_USER_FEATURES, df_all["user_id"].values, n_train)
+    ttable = build_tag_table(basic)
+    X_tag, tag_dim, tag_n_fields = encode_cat_fields(
+        ttable, CAT_TAG_FEATURES, df_all["video_id"].values, n_train)
 
     data = {"dim": dim, "K": K, "n_fields": len(FIELDS),
             "vside_dim": vside_dim, "vside_n_fields": vside_n_fields,
             "uside_dim": uside_dim, "uside_n_fields": uside_n_fields,
+            "tag_dim": tag_dim, "tag_n_fields": tag_n_fields,
             "cont_dim": cont_dim}
     bounds = {"train": (0, n_train),
               "valid": (n_train, n_train + n_valid),
@@ -145,6 +149,6 @@ def load_extended(data_dir: str, K: int = 50) -> dict:
         data[name] = {
             "X": X, "y": y, "users": users, "aux": aux,
             "hist": hist_all[s:e], "hist_mask": mask_all[s:e],
-            "X_vside": X_vside[s:e], "X_uside": X_uside[s:e], "cont": cont[s:e],
+            "X_vside": X_vside[s:e], "X_uside": X_uside[s:e], "X_tag": X_tag[s:e], "cont": cont[s:e],
         }
     return data

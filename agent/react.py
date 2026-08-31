@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agent import memory, prompts, tools
-from agent.llm import usage_tokens
+from agent.llm import usage_inout, usage_tokens
 from agent.logger import tail
 
 MAX_EPISODE_TURNS = 6
@@ -27,6 +27,8 @@ class EpisodeResult:
     verdict: str = ""
     lesson: str = ""
     tokens: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
     gpu_h: float = 0.0
     error: str | None = None
     recovery: str = ""
@@ -58,19 +60,25 @@ class ReActAgent:
         ctx.lesson = ""
         ctx.finish_seen = False
 
+        playbook = memory.load_playbook()
         lessons = memory.lessons_digest(tail(30), k=8)
-        preamble = memory.build_preamble(state, tail(5), lessons)
+        preamble = memory.build_preamble(state, tail(5), lessons, playbook)
         if self.history:
             preamble = ("## History (one line per past episode, newest last)\n"
                         + "\n".join(self.history) + "\n\n" + preamble)
         messages = [{"role": "user", "content": preamble}]
 
         tokens = 0
+        tokens_in = 0
+        tokens_out = 0
         failed = False
         try:
             for _ in range(MAX_EPISODE_TURNS):
                 content, usage = self.llm.complete(messages, tools=self.tool_schemas)
                 tokens += usage_tokens(usage)
+                ti, to = usage_inout(usage)
+                tokens_in += ti
+                tokens_out += to
                 uses = self.llm.tool_uses(content)
                 messages.append({"role": "assistant", "content": _content_to_dicts(content)})
                 if not uses:
@@ -87,24 +95,30 @@ class ReActAgent:
         if ctx.run_record is None:
             # No experiment ran (stall or early failure). Consume no iteration; the
             # orchestrator's no-LLM fallback guarantees forward progress.
-            return EpisodeResult(tokens=tokens, failed=failed)
+            return EpisodeResult(tokens=tokens, tokens_in=tokens_in,
+                                 tokens_out=tokens_out, failed=failed)
 
         if not ctx.finish_seen:
             try:
-                tokens += self._force_finish(ctx, messages)
+                ti, to = self._force_finish(ctx, messages)
+                tokens += ti + to
+                tokens_in += ti
+                tokens_out += to
             except Exception:  # noqa: BLE001 — a run must never be orphaned
                 pass
-        verdict, vp, tp = tools.finalize_run(state, ctx.run_record, tokens, ctx.lesson)
+        verdict, vp, tp = tools.finalize_run(state, ctx.run_record, tokens, ctx.lesson,
+                                             tokens_in, tokens_out)
         self._remember(memory.episode_line(ctx.run_record["hypothesis"],
                                            ctx.run_record["cfg"], vp, tp,
                                            verdict, ctx.lesson))
         r = ctx.run_record
         return EpisodeResult(hypothesis=r["hypothesis"], config=r["cfg"],
                              metrics=r["metrics"], verdict=verdict, lesson=ctx.lesson,
-                             tokens=tokens, gpu_h=r["gpu_h"], error=r["error"],
+                             tokens=tokens, tokens_in=tokens_in, tokens_out=tokens_out,
+                             gpu_h=r["gpu_h"], error=r["error"],
                              recovery=r["recovery"], ran=True, failed=failed)
 
-    def _force_finish(self, ctx: tools.Ctx, messages: list[dict]) -> int:
+    def _force_finish(self, ctx: tools.Ctx, messages: list[dict]) -> tuple[int, int]:
         """Force finish_episode after the turn cap so an executed run is never orphaned."""
         if not messages or messages[-1]["role"] != "user":
             messages.append({"role": "user", "content":
@@ -116,7 +130,7 @@ class ReActAgent:
         inp = self.llm.tool_use(content)
         ctx.lesson = str(inp.get("lesson") or "").strip()
         ctx.finish_seen = True
-        return usage_tokens(usage)
+        return usage_inout(usage)
 
     def _remember(self, line: str) -> None:
         self.history.append(line)

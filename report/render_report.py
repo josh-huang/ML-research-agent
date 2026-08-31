@@ -3,7 +3,8 @@
 Reads ``run_logs/run_log.jsonl`` + ``run_logs/state.json`` and writes
 ``report/run_report.html`` (a single file, no external assets). This is the
 "Run & Iteration Logs" deliverable: a readable trajectory chart + per-iteration
-table with hypothesis / config / metrics / verdict / cost.
+table (hypothesis / config / metrics / verdict / cost / delta vs baseline) +
+the agent's procedural lessons.
 
 Usage (from project root)::
 
@@ -14,7 +15,6 @@ from __future__ import annotations
 import html
 import json
 import os
-import sys
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 LOG = os.path.join(_ROOT, "run_logs", "run_log.jsonl")
@@ -22,6 +22,8 @@ STATE = os.path.join(_ROOT, "run_logs", "state.json")
 OUT = os.path.join(_ROOT, "report", "run_report.html")
 
 BASELINE_VALID = 0.6016
+BASELINE_TEST = 0.5946
+ORACLE = 0.8645
 
 
 def _load():
@@ -110,12 +112,21 @@ def _rows(iters):
         t = (m.get("test") or {}).get("primary")
         vv = f"{v:.4f}" if v is not None else "—"
         tt = f"{t:.4f}" if t is not None else "—"
+        dv = f"{v - BASELINE_VALID:+.4f}" if v is not None else "—"
         cfg = it.get("action") or {}
         desc = f"{cfg.get('model','?')}+{cfg.get('loss','?')} "
         if cfg.get("k"):
             desc += f"k={cfg['k']} "
         if cfg.get("lr"):
             desc += f"lr={cfg['lr']:g}"
+        if cfg.get("aux"):
+            desc += f" aux={cfg['aux']}"
+        if cfg.get("use_videoside"):
+            desc += " +vside"
+        if cfg.get("use_userside"):
+            desc += " +uside"
+        if cfg.get("use_tagside"):
+            desc += " +tagside"
         verdict = it.get("verdict") or ""
         badge = {"new_best": "best", "accept": "ok", "reject": "—", "error": "ERR"}.get(verdict, verdict)
         errors = "; ".join(it.get("errors") or [])
@@ -124,6 +135,7 @@ def _rows(iters):
 <td class="h">{_esc(it.get('hypothesis',''))}</td>
 <td class="c mono">{_esc(desc)}</td>
 <td class="c num">{vv}</td>
+<td class="c num dlt">{dv}</td>
 <td class="c num">{tt}</td>
 <td class="c v v-{verdict}">{badge}</td>
 <td class="c num">{it.get('tokens',0)}</td>
@@ -133,8 +145,42 @@ def _rows(iters):
     return "".join(out)
 
 
+def _lessons(iters):
+    """Dedup'd latest lessons, newest first (the agent's procedural memory)."""
+    seen, out = [], []
+    for it in reversed(iters):
+        lesson = (it.get("lesson") or "").strip()
+        if lesson and lesson not in seen:
+            seen.append(lesson)
+            out.append((it.get("iteration"), lesson))
+    return out
+
+
+def _best_test(iters, state):
+    """test primary at the best iteration, else None."""
+    bi = state.get("best_iter")
+    for it in iters:
+        if it.get("iteration") == bi:
+            m = it.get("metrics") or {}
+            return (m.get("test") or {}).get("primary")
+    return None
+
+
 def _html(iters, state):
     best = state.get("best_primary", 0.0)
+    best_test = _best_test(iters, state)
+    d_valid = best - BASELINE_VALID
+    d_test = (best_test - BASELINE_TEST) if best_test is not None else None
+    headroom = ORACLE - BASELINE_TEST
+    progress = (d_test / headroom) if d_test is not None else None
+    lessons = _lessons(iters)
+    lessons_html = "".join(
+        f"<li><span class='li'>iter {i}</span> {_esc(l)}</li>" for i, l in lessons
+    ) if lessons else "<p>No lessons recorded.</p>"
+    best_test_str = f"{best_test:.4f}" if best_test is not None else "—"
+    d_test_str = f"{d_test:+.4f}" if d_test is not None else "—"
+    progress_str = f"{progress:.1%}" if progress is not None else "—"
+
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -145,17 +191,19 @@ body {{ margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sa
 .wrap {{ max-width:1000px; margin:0 auto; padding:32px 20px 64px; }}
 h1 {{ font-size:22px; margin:0 0 4px; }}
 .sub {{ color:var(--muted); margin:0 0 24px; }}
-.cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:28px; }}
+.cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:28px; }}
 .card {{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }}
 .card .k {{ font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }}
 .card .v {{ font-size:22px; font-weight:650; margin-top:2px; }}
 .card .v.best {{ color:var(--accent); }}
+.card .d {{ font-size:11px; color:var(--muted); margin-top:4px; }}
 h2 {{ font-size:16px; margin:28px 0 10px; }}
 table {{ width:100%; border-collapse:collapse; font-size:12.5px; }}
 th,td {{ padding:8px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }}
 th {{ font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }}
 td.c {{ white-space:nowrap; }}
 td.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
+td.dlt {{ color:var(--muted); }}
 td.mono {{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; }}
 td.h {{ max-width:340px; }}
 td.err {{ color:#dc2626; font-size:11px; }}
@@ -163,24 +211,31 @@ td.err {{ color:#dc2626; font-size:11px; }}
 .v-accept {{ color:#2563eb; }}
 .v-reject {{ color:#9ca3af; }}
 .v-error {{ color:#dc2626; font-weight:650; }}
+ol.lessons {{ padding-left:20px; margin:8px 0; }}
+ol.lessons li {{ margin:8px 0; font-size:13px; }}
+.li {{ color:var(--muted); font-size:11px; }}
 footer {{ margin-top:32px; color:var(--muted); font-size:11px; }}
 </style></head><body><div class="wrap">
 <h1>Autonomous ML Research Agent — Run Report</h1>
 <p class="sub">KuaiRand-Pure · within-user ranking · label <code>long_view</code> · primary = mean(GAUC, nDCG@5)</p>
 <div class="cards">
-<div class="card"><div class="k">Best valid primary</div><div class="v best">{best:.4f}</div></div>
+<div class="card"><div class="k">Best valid primary</div><div class="v best">{best:.4f}</div><div class="d">Δ {d_valid:+.4f} vs baseline {BASELINE_VALID}</div></div>
+<div class="card"><div class="k">Best test primary</div><div class="v best">{best_test_str}</div><div class="d">Δ {d_test_str} vs baseline {BASELINE_TEST}</div></div>
+<div class="card"><div class="k">Progress vs oracle</div><div class="v">{progress_str}</div><div class="d">ceiling {ORACLE}</div></div>
 <div class="card"><div class="k">Iterations</div><div class="v">{state.get('iterations', 0)}</div></div>
-<div class="card"><div class="k">Configs tried</div><div class="v">{state.get('n_configs_tried', 0)}</div></div>
 <div class="card"><div class="k">Tokens</div><div class="v">{state.get('tokens_used', 0):,}</div></div>
 <div class="card"><div class="k">GPU-hours</div><div class="v">{state.get('gpu_hours', 0):.3f}</div></div>
-<div class="card"><div class="k">Converged</div><div class="v">{'yes' if state.get('converged') else 'no'}</div></div>
+<div class="card"><div class="k">Converged</div><div class="v">{'yes' if state.get('converged') else 'no'}</div><div class="d">{state.get('stagnant', 0)}/3 stagnant</div></div>
+<div class="card"><div class="k">Configs tried</div><div class="v">{state.get('n_configs_tried', 0)}</div></div>
 </div>
 <h2>Trajectory (valid primary vs iteration)</h2>
 {_chart(iters)}
 <h2>Iterations</h2>
-<table><thead><tr><th>#</th><th>Hypothesis</th><th>Config</th><th>valid</th><th>test</th><th>verdict</th><th>tok</th><th>gpu-h</th><th>error</th></tr></thead>
+<table><thead><tr><th>#</th><th>Hypothesis</th><th>Config</th><th>valid</th><th>Δ valid</th><th>test</th><th>verdict</th><th>tok</th><th>gpu-h</th><th>error</th></tr></thead>
 <tbody>{_rows(iters)}</tbody></table>
-<footer>Generated by report/render_report.py · baseline FM valid primary {BASELINE_VALID} · oracle ceiling 0.8645</footer>
+<h2>Lessons learned</h2>
+<ol class="lessons">{lessons_html}</ol>
+<footer>Generated by report/render_report.py · baseline FM valid {BASELINE_VALID} / test {BASELINE_TEST} · oracle ceiling {ORACLE} · human interventions {state.get('interventions', 0)}</footer>
 </div></body></html>"""
 
 
@@ -189,7 +244,9 @@ def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(_html(iters, state))
-    print(f"wrote {OUT} ({len(iters)} iterations, best valid {state.get('best_primary', 0):.4f})")
+    best = state.get("best_primary", 0)
+    print(f"wrote {OUT} ({len(iters)} iterations, best valid {best:.4f} "
+          f"({best - BASELINE_VALID:+.4f} vs baseline))")
 
 
 if __name__ == "__main__":
