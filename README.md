@@ -5,11 +5,6 @@ iterates on its own — running EDA, proposing data-driven hypotheses, training,
 and reflecting — to maximize within-user ranking of `long_view`, under a hard budget of
 tokens / GPU-hours / human interventions.
 
-## Team
-
-Solo participant — **Josh Huang (黄葭澍)**. Built, researched, and ran end-to-end: agent design,
-model scaffold, evaluation, and report.
-
 ## Result
 
 | model | GAUC | nDCG@5 | **primary** | vs baseline |
@@ -27,7 +22,7 @@ std ≈ 0.0001). The agent reproduced the baseline, explored the headroom, and c
 
 ---
 
-## Strategy: "floor + autonomy" (保底 + 自治)
+## Strategy: "floor + autonomy"
 
 The competition rewards the score (35%) **and** the agent itself (autonomy 20%, innovation
 20%, feasibility 15%). These two pull against each other — a hand-tuned model maximizes the
