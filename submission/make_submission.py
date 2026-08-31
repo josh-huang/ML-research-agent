@@ -33,9 +33,10 @@ from models.train import run_experiment  # noqa: E402
 DATA_DIR = os.path.join(_KIT, "KuaiRand-Pure", "data")
 OUT = os.path.join(_ROOT, "submission", "final.csv")
 
-# Best verified config (Phase 3d hyperparameter sweep): valid 0.6047 / test 0.5978.
+# Best verified config (autonomous run, iter 2): valid 0.6053 / test 0.5988.
 BEST_CONFIG = dict(model="din", loss="bce", k=32, lr=3e-4, dropout=0.2,
-                   dnn_hidden=(64, 32), seed=0)
+                   dnn_hidden=(64, 32), seed=0, aux="cwm", aux_weight=0.1,
+                   use_videoside=True, epochs=40, bs=8192, patience=8)
 
 
 def main() -> None:
