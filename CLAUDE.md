@@ -52,7 +52,7 @@ ML-research-agent/
 - 产出：Devpost 文本稿（**新写**；从 README「Strategy / Key findings」提炼）。
 
 ### D2 公开代码 / GitHub 仓库
-- README 必含：概览 / 安装 / 复现 / 局限与改进方向 / 团队分工。仓库 `README.md` 已覆盖前四者，**缺「团队分工」——补一句 solo participant（单人）**。
+- README 必含：概览 / 安装 / 复现 / 局限与改进方向 / 团队分工。仓库 `README.md` 已覆盖前四者，**缺「团队分工」——暂移除，交付前补实际团队信息（非 solo）**。
 - 代码注释齐全、结构清晰；凭证/密钥绝不入仓库（`.env` 不入 commit）。
 
 ### D3 Run & Iteration Logs（每轮日志）
@@ -69,7 +69,7 @@ ML-research-agent/
 - 资源用量（供 Feasibility 打分）：迭代数（**50 轮 cap**，我们 ε=0.002/N=3 会提前收敛）、墙钟（`state.elapsed_s`）、GPU-hours（`state.gpu_hours`）、token **input+output 分列**（`llm.complete()` 已返回 input/output/cache 分列，但 `state` 只存总量 `tokens_used`，**交付前补 `tokens_input`/`tokens_output` 聚合**）。
 
 ### 交付前待办（缺口清单）
-1. README 补「团队分工（solo）」（D2）。
+1. README 补「团队分工」（暂移除，交付前填实际团队，非 solo）。
 2. `run_log` 补 run 起始 `git_sha` 字段（D3「code diff」可追溯）。
 3. `state` 补 token input/output 分列聚合（D4）。
 4. 新写 D1 Devpost 描述稿。
