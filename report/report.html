@@ -1,0 +1,530 @@
+<title>Floor + Autonomy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --paper: #F5F6F2;
+    --surface: #FFFFFF;
+    --ink: #16181D;
+    --muted: #5F646E;
+    --faint: #8A8E98;
+    --hairline: #E2E3DC;
+    --accent: #2E4BE0;
+    --accent-ink: #FFFFFF;
+    --signal: #14734B;
+    --reject: #B23A48;
+    --noise: #8A7F4F;
+    --keep-bg: rgba(20, 115, 75, 0.09);
+    --keep-bd: rgba(20, 115, 75, 0.26);
+    --reject-bg: rgba(178, 58, 72, 0.09);
+    --reject-bd: rgba(178, 58, 72, 0.26);
+    --noise-bg: rgba(138, 127, 79, 0.12);
+    --noise-bd: rgba(138, 127, 79, 0.30);
+    --code-bg: #EDEEE8;
+    --maxw: 1080px;
+    --measure: 680px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #121318;
+      --surface: #1A1C23;
+      --ink: #E7E8EC;
+      --muted: #9BA0AC;
+      --faint: #737886;
+      --hairline: #2A2D36;
+      --accent: #6D84FF;
+      --accent-ink: #0D1020;
+      --signal: #3EBD85;
+      --reject: #E06B78;
+      --noise: #C4B368;
+      --keep-bg: rgba(62, 189, 133, 0.12);
+      --keep-bd: rgba(62, 189, 133, 0.30);
+      --reject-bg: rgba(224, 107, 120, 0.12);
+      --reject-bd: rgba(224, 107, 120, 0.30);
+      --noise-bg: rgba(196, 179, 104, 0.12);
+      --noise-bd: rgba(196, 179, 104, 0.30);
+      --code-bg: #1A1C23;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #121318;
+    --surface: #1A1C23;
+    --ink: #E7E8EC;
+    --muted: #9BA0AC;
+    --faint: #737886;
+    --hairline: #2A2D36;
+    --accent: #6D84FF;
+    --accent-ink: #0D1020;
+    --signal: #3EBD85;
+    --reject: #E06B78;
+    --noise: #C4B368;
+    --keep-bg: rgba(62, 189, 133, 0.12);
+    --keep-bd: rgba(62, 189, 133, 0.30);
+    --reject-bg: rgba(224, 107, 120, 0.12);
+    --reject-bd: rgba(224, 107, 120, 0.30);
+    --noise-bg: rgba(196, 179, 104, 0.12);
+    --noise-bd: rgba(196, 179, 104, 0.30);
+    --code-bg: #1A1C23;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .mono, .num, td.num, code, pre {
+    font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+  a:hover { border-bottom-color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 28px; }
+  .measure { max-width: var(--measure); }
+
+  /* ---- hero ---- */
+  header {
+    border-bottom: 1px solid var(--hairline);
+    padding: 72px 0 56px;
+    animation: rise .6s ease-out both;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 22px;
+  }
+  h1 {
+    font-size: clamp(44px, 7vw, 76px);
+    line-height: .98;
+    font-weight: 800;
+    letter-spacing: -.02em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  h1 .plus { color: var(--accent); font-weight: 600; }
+  .lede {
+    font-size: 19px;
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: var(--measure);
+    margin: 0 0 40px;
+    text-wrap: pretty;
+  }
+
+  .readout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 40px;
+    align-items: end;
+    padding-top: 8px;
+  }
+  @media (max-width: 760px) { .readout { grid-template-columns: 1fr; } }
+  .delta { grid-column: 1; }
+  .delta .big {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: clamp(44px, 6vw, 64px);
+    font-weight: 600;
+    letter-spacing: -.02em;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .delta .label { color: var(--muted); font-size: 14px; margin-top: 10px; max-width: 30ch; }
+  .scale { grid-column: 2; }
+  .scale .axis {
+    position: relative;
+    height: 34px;
+    margin-bottom: 12px;
+  }
+  .scale .track {
+    position: absolute;
+    top: 50%; left: 0; right: 0;
+    height: 4px;
+    transform: translateY(-50%);
+    background: var(--hairline);
+    border-radius: 2px;
+  }
+  .scale .mark {
+    position: absolute;
+    top: 50%;
+    left: 1.56%;
+    width: 14px; height: 14px;
+    transform: translate(-50%, -50%);
+    background: var(--accent);
+    border: 3px solid var(--paper);
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .scale .marks { position: relative; height: 20px; }
+  .scale .marks span {
+    position: absolute; top: 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--faint);
+    transform: translateX(-50%);
+    white-space: nowrap;
+  }
+  .scale .marks .m-baseline { left: 0; }
+  .scale .marks .m-ours { left: 1.56%; color: var(--accent); font-weight: 500; }
+  .scale .marks .m-oracle { left: 100%; }
+
+  .chips {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-top: 40px;
+  }
+  .chip {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    padding: 6px 12px;
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    color: var(--muted);
+    background: var(--surface);
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+
+  /* ---- sections ---- */
+  section { padding: 64px 0; border-bottom: 1px solid var(--hairline); }
+  section:last-of-type { border-bottom: none; }
+  .sec-head { margin-bottom: 32px; }
+  .sec-num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  h2 {
+    font-size: clamp(26px, 3.6vw, 36px);
+    font-weight: 700;
+    letter-spacing: -.015em;
+    line-height: 1.1;
+    margin: 10px 0 12px;
+    text-wrap: balance;
+  }
+  .sec-lede { color: var(--muted); font-size: 17px; max-width: var(--measure); text-wrap: pretty; }
+  p { max-width: var(--measure); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+
+  /* ---- tables ---- */
+  .table-scroll { overflow-x: auto; margin: 24px 0; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  thead th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--paper) 55%, var(--surface));
+    font-weight: 500;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: color-mix(in srgb, var(--accent) 3%, transparent); }
+  td.num { text-align: right; }
+  td.num.best { color: var(--accent); font-weight: 600; }
+  .row-hi td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+
+  /* verdict chips */
+  .v {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: .04em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+  .v--keep { color: var(--signal); background: var(--keep-bg); border-color: var(--keep-bd); }
+  .v--reject { color: var(--reject); background: var(--reject-bg); border-color: var(--reject-bd); }
+  .v--noise { color: var(--noise); background: var(--noise-bg); border-color: var(--noise-bd); }
+
+  /* ---- callout ---- */
+  .callout {
+    margin: 32px 0;
+    border: 1px solid var(--accent);
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    padding: 24px 26px;
+    background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  }
+  .callout h3 { margin: 0 0 10px; font-size: 17px; font-weight: 700; }
+  .callout p { margin: 0 0 10px; max-width: none; }
+  .callout p:last-child { margin-bottom: 0; }
+
+  /* ---- model card ---- */
+  .card {
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    background: var(--surface);
+    padding: 22px 24px;
+    margin: 24px 0;
+  }
+  .card h4 { margin: 0 0 4px; font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-family: "IBM Plex Mono", monospace; font-weight: 500; }
+  .card .spec { font-family: "IBM Plex Mono", monospace; font-size: 15px; line-height: 1.7; color: var(--ink); }
+
+  /* ---- code ---- */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  pre code { color: var(--ink); }
+  .c-comment { color: var(--faint); }
+
+  /* ---- sparkline ---- */
+  .spark { display: flex; align-items: center; gap: 20px; margin: 20px 0; }
+  .spark svg { flex-shrink: 0; }
+  .spark figcaption { font-size: 13.5px; color: var(--muted); max-width: 34ch; }
+
+  footer { padding: 48px 0 72px; }
+  footer .meta { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--faint); line-height: 1.9; }
+  footer .meta a { color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    header { animation: none; }
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">TikTok TechJam 2026 · Solo submission · Josh Huang</p>
+  <h1>Floor <span class="plus">+</span> Autonomy</h1>
+  <p class="lede">An autonomous ML-research agent that reproduces the KuaiRand-Pure ranking baseline, then iterates on its own — and, more importantly, learns when to stop. The honest headline is a small, variance-bounded gain; the real value is the verifiable trail behind it.</p>
+
+  <div class="readout">
+    <div class="delta">
+      <div class="big num">+0.0042</div>
+      <div class="label">test <span class="mono">primary = mean(GAUC, nDCG@5)</span>, ours vs the official FM baseline</div>
+    </div>
+    <div class="scale">
+      <div class="axis"><div class="track"></div><div class="mark"></div></div>
+      <div class="marks">
+        <span class="m-baseline">baseline 0.5946</span>
+        <span class="m-ours">ours 0.5988</span>
+        <span class="m-oracle">oracle 0.8645</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="chips">
+    <span class="chip"><b>7</b> iterations</span>
+    <span class="chip"><b>383,772</b> tokens</span>
+    <span class="chip"><b>0.0535</b> GPU-hours</span>
+    <span class="chip"><b>0</b> interventions</span>
+    <span class="chip"><b>0</b> errors</span>
+  </div>
+</header>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">01 · Problem &amp; approach</div>
+    <h2>Score and autonomy pull against each other</h2>
+  </div>
+  <p class="sec-lede">The competition weights the metric (35%) <em>and</em> the agent — autonomy (20%), innovation (20%), feasibility (15%). A hand-tuned model wins the score but proves nothing about autonomy; a pure autonomous agent risks a weak score. This project takes both ends at once.</p>
+
+  <div class="cols" style="margin-top:32px">
+    <div>
+      <p><strong>The task.</strong> Within-user ranking over logged impressions (no full-library retrieval). Label: <span class="mono">long_view</span> ∈ {0,1}. Metric: <span class="mono">primary = mean(GAUC, nDCG@5)</span>, scored by the <em>official</em> <span class="mono">evaluate.py</span> — imported, never modified. Convergence: ε = 0.002 over N = 3 rounds. Oracle ceiling: <span class="num">0.8645</span>.</p>
+    </div>
+    <div>
+      <p><strong>The approach — two layers.</strong> A hand-built, verified-strong <em>floor</em> first (FM → DeepFM → DIN, side features, aux losses), so the score never depends on the agent getting lucky. Then the agent runs the full closed loop <em>on its own</em>: reproduce the baseline, read its own EDA, propose, train, evaluate, reflect, converge — zero interventions.</p>
+    </div>
+  </div>
+  <p style="margin-top:24px">The floor is injected as <em>prior knowledge</em>, but the agent is not allowed to blindly copy it — every turn must cite EDA evidence for a falsifiable hypothesis. In the run below the agent independently re-derived the same plateau the floor found, which is the point: it <em>proves</em> the autonomy claim rather than asserting it.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">02 · The autonomous run</div>
+    <h2>Seven iterations, then a decision to stop</h2>
+  </div>
+  <p class="sec-lede">A fresh, fully-autonomous run on Claude Sonnet 5. It converged in 7 iterations, and its log, state, and numbers are what feed this report.</p>
+
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>iter</th><th>config (delta vs prior)</th><th>valid primary</th><th>test primary</th><th>verdict</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="num">1</td><td>FM baseline (pointwise BCE)</td><td class="num">0.6020</td><td class="num">0.5959</td><td><span class="v v--keep">anchor</span></td></tr>
+        <tr class="row-hi"><td class="num">2</td><td>DIN + CWM(0.1) + videoside, k=32, seed=0</td><td class="num best">0.6053</td><td class="num best">0.5988</td><td><span class="v v--keep">new best</span></td></tr>
+        <tr><td class="num">3</td><td>same anchor, seed=1</td><td class="num">0.6045</td><td class="num">0.5988</td><td><span class="v v--reject">reject</span></td></tr>
+        <tr><td class="num">4</td><td>same anchor, seed=2</td><td class="num">0.6049</td><td class="num">0.5990</td><td><span class="v v--reject">reject</span></td></tr>
+        <tr><td class="num">5</td><td>tag-side only (no videoside)</td><td class="num">0.6047</td><td class="num">0.5978</td><td><span class="v v--reject">reject</span></td></tr>
+        <tr><td class="num">6</td><td>videoside + tagside</td><td class="num">0.6052</td><td class="num">0.5989</td><td><span class="v v--reject">reject</span></td></tr>
+        <tr><td class="num">7</td><td>k=48 + videoside + tagside</td><td class="num">0.6050</td><td class="num">0.5987</td><td><span class="v v--reject">reject</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <figure class="spark">
+    <svg width="220" height="44" viewBox="0 0 220 44" role="img" aria-label="test primary across 7 iterations">
+      <polyline points="4,34 40,8 76,8 112,6 148,17 184,7 216,9" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="40" cy="8" r="4" fill="var(--accent)"/>
+    </svg>
+    <figcaption><strong>Test primary across the seven iterations</strong> — up once (iter 2), then flat-with-jitter. The agent read that correctly as a plateau, not as more searchable headroom.</figcaption>
+  </figure>
+
+  <p>Beyond the headline number, the agent did the right <em>research</em>: it reproduced the baseline (iter 1); locked the documented plateau (iter 2) instead of leaving its bookkeeping stuck at the weaker baseline; ran a <strong>3-seed noise calibration</strong> (iters 3–4) to test whether its “best” was real or luck; then closed out the remaining untried cells (tag-alone, tag+videoside, k=48) and concluded the config space was exhausted — stopping rather than burning budget on sub-noise recombinations.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">03 · Key findings</div>
+    <h2>Every lever clusters at the same plateau</h2>
+  </div>
+  <p class="sec-lede">The binary <span class="mono">long_view</span> label already captures almost all the ranking signal, so rich directions either plateau or hurt. The agent ruled out the dead ends cheaply and reproducibly.</p>
+
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>hypothesis (EDA-driven)</th><th>result</th><th>verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Pointwise BCE is the trust anchor</td><td>FM reproduces baseline <span class="num">valid 0.6020</span></td><td><span class="v v--keep">keep</span></td></tr>
+        <tr><td>BPR (pairwise) aligns with GAUC’s within-user semantics</td><td>FM +0.001, DIN ~flat</td><td><span class="v v--noise">marginal</span></td></tr>
+        <tr><td>Listwise softmax matches the ranking objective</td><td>worse than BCE (overfits)</td><td><span class="v v--reject">reject</span></td></tr>
+        <tr><td>DeepFM’s MLP tower adds capacity</td><td>+0.001</td><td><span class="v v--noise">marginal</span></td></tr>
+        <tr><td>DIN’s history attention adds the user sequence</td><td>+0.002 → best single model</td><td><span class="v v--keep">keep</span></td></tr>
+        <tr><td>CWM soft-label (watch-fraction as target)</td><td>valid 0.557 — much worse</td><td><span class="v v--reject">dead end</span></td></tr>
+        <tr><td>CWM censored aux (one-sided watch-time as an <em>aux</em> loss)</td><td>lifts DIN only, weight-insensitive</td><td><span class="v v--keep">keep</span></td></tr>
+        <tr><td>video-side categoricals (<span class="mono">use_videoside</span>)</td><td>+0.002 on DIN</td><td><span class="v v--keep">keep</span></td></tr>
+        <tr><td>user-side features (<span class="mono">use_userside</span>)</td><td>−0.0004 to −0.0009, real harm</td><td><span class="v v--reject">reject</span></td></tr>
+        <tr><td>tag content category (rank-relevance 0.954)</td><td>redundant with videoside in every combination</td><td><span class="v v--noise">flat</span></td></tr>
+        <tr><td>k=48 wider embedding</td><td>no effect vs k=32</td><td><span class="v v--noise">flat</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <h3>The run’s most important finding: seed noise, calibrated</h3>
+    <p>Re-running the <em>identical</em> best config across seeds 0/1/2 gives <strong>valid</strong> primary <span class="num">0.6053 / 0.6045 / 0.6049</span> (mean 0.6049, std ≈ 0.0003, range 0.0008) while <strong>test</strong> is far more stable: <span class="num">0.5988 / 0.5988 / 0.5990</span> (std ≈ 0.0001).</p>
+    <p>Two consequences: <strong>test is the trustworthy generalization signal</strong>, while valid carries real ±0.0004–0.0008 jitter; and <strong>single-seed valid deltas below ~0.001 are indistinguishable from noise</strong>. That retroactively re-reads every “definitive” flat verdict as noise-floor-consistent, and every trustworthy signal (DIN +0.003, videoside +0.002, userside harm, BPR/listwise −0.002…−0.004) as the only effects that clear the floor. This is a reusable discipline the agent discovered and codified into its own playbook.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">04 · Results</div>
+    <h2>A real but small, variance-bounded gain</h2>
+  </div>
+
+  <div class="card">
+    <h4>Final submitted model</h4>
+    <div class="spec">DIN · k=32 · lr=3e-4 · dropout=0.2 · dnn=[64,32] · batch 8192 · epochs 40 · patience 8 · seed 0 · pointwise BCE · CWM censored-watch-time aux (weight 0.1) · video-side categoricals on</div>
+  </div>
+
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>split</th><th>GAUC</th><th>nDCG@5</th><th>primary</th></tr></thead>
+      <tbody>
+        <tr><td>valid</td><td class="num">0.6726</td><td class="num">0.5379</td><td class="num">0.6053</td></tr>
+        <tr class="row-hi"><td><strong>test</strong></td><td class="num best">0.6660</td><td class="num best">0.5315</td><td class="num best">0.5988</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>delta vs baseline</th><th>official</th><th>ours</th><th>Δ</th></tr></thead>
+      <tbody>
+        <tr><td>test GAUC</td><td class="num">0.6610</td><td class="num">0.6660</td><td class="num best">+0.0050</td></tr>
+        <tr><td>test nDCG@5</td><td class="num">0.5282</td><td class="num">0.5315</td><td class="num best">+0.0033</td></tr>
+        <tr class="row-hi"><td><strong>test primary</strong></td><td class="num">0.5946</td><td class="num">0.5988</td><td class="num best">+0.0042</td></tr>
+        <tr><td>valid primary</td><td class="num">0.6016</td><td class="num">0.6053</td><td class="num best">+0.0037</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The +0.0042 test gain is <strong>variance-bounded, not a one-shot</strong>: the 3-seed test mean is 0.5989 ± 0.0001, and test is the stable split. The gain is real but small — an honest reflection that the binary <span class="mono">long_view</span> label already carries the signal.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">05 · Resource accounting</div>
+    <h2>Feasibility, measured</h2>
+  </div>
+  <p class="sec-lede">Feasibility is scored on wall-clock, tokens, GPU-hours, and interventions — the organizer caps a run at 50 iterations / 6 hours.</p>
+
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>resource</th><th>autonomous run</th></tr></thead>
+      <tbody>
+        <tr><td>iterations</td><td class="num"><strong>7</strong> — converged at ε=0.002/N=3; the 50-iteration cap was never approached</td></tr>
+        <tr><td>wall-clock</td><td class="num"><strong>339 s</strong> (~5.6 min, well under 6 h)</td></tr>
+        <tr><td>tokens</td><td class="num"><strong>383,772</strong> (input + output + cache, as metered by the API)</td></tr>
+        <tr><td>GPU-hours</td><td class="num"><strong>0.0535</strong> (single RTX 5070 Ti; DIN trains in ~30 s)</td></tr>
+        <tr><td>human interventions</td><td class="num"><strong>0</strong> — fully autonomous baseline → convergence</td></tr>
+        <tr><td>errors</td><td class="num"><strong>0</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Cost stays low via prompt-caching the stable system prompt (paid once), disabled extended thinking, and a token-frugal EDA summary instead of raw data dumps.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">06 · Limitations &amp; next</div>
+    <h2>The agent’s value is ruling out dead ends</h2>
+  </div>
+  <p>The honest headline is that the achievable gain is small (+0.0042): the <span class="mono">user_id × video_id</span> interaction and the binary label already capture the ranking signal, and every “rich” direction fights the binary metric. The agent’s value here is <strong>not</strong> discovering a +0.03 trick that doesn’t exist — it’s cheaply and reproducibly ruling out the plausible dead ends with a verifiable trail.</p>
+  <p>Its own EDA and playbook name the two genuinely <em>unwired</em> signal sources that sit outside the current config-only action space — the next thing to build:</p>
+  <div class="cols" style="margin-top:24px">
+    <div><p><strong>1 · True sequential history density</strong> (<span class="mono">hist_len</span> / <span class="mono">time_since_last</span>, rank-relevance up to 0.850–0.894) — needs a new feature exposed to the model.</p></div>
+    <div><p><strong>2 · Duration-aware negative-sampling reweighting</strong> — needs a harness-level change to the sampling/loss pipeline.</p></div>
+  </div>
+  <p style="margin-top:24px">Both require code beyond config flags — which is exactly why the agent correctly stopped grid-searching and reported the plateau.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">07 · Reproduce</div>
+    <h2>Run it yourself</h2>
+  </div>
+<pre><code><span class="c-comment"># deps</span>
+pip install torch numpy pandas anthropic python-dotenv
+
+<span class="c-comment"># data (KuaiRand-Pure) — see the official README</span>
+<span class="c-comment">#   wget https://zenodo.org/records/10439422/files/KuaiRand-Pure.tar.gz &amp;&amp; tar xzf ...</span>
+
+<span class="c-comment"># put your Anthropic key in .env (ANTHROPIC_API_KEY=sk-...)</span>
+
+<span class="c-comment"># reproduce the baseline &amp; our model</span>
+python -m models.train --model fm --loss bce        <span class="c-comment"># valid ~0.6020</span>
+python submission/make_submission.py                <span class="c-comment"># DIN -&gt; submission/final.csv</span>
+
+<span class="c-comment"># run the autonomous agent (reproduces baseline, then iterates to convergence)</span>
+python -m agent.main --fresh --max_iters 10</code></pre>
+  <p>The per-iteration log is in <span class="mono">run_logs/run_log.jsonl</span>; best-so-far state in <span class="mono">run_logs/state.json</span>; a live dashboard via <span class="mono">streamlit run dashboard/app.py</span>.</p>
+</section>
+
+<footer>
+  <div class="meta">
+    <p>Pinned at commit <span class="num">ec5cd5a</span> — the agent mutates config only, never code, so the commit plus each run-log <span class="mono">action</span> field give a fully reproducible trace.</p>
+    <p><a href="../docs/REPORT.md">Full written report</a> · <a href="../docs/DEVPOST.md">Devpost text</a> · <a href="../README.md">README</a></p>
+  </div>
+</footer>
+
+</div>
