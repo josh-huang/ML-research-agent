@@ -86,3 +86,11 @@ and reported the plateau.
 - **API:** Anthropic Claude (Messages API)
 - **Tools:** PyCharm, VSCode
 - **Dataset:** KuaiRand-Pure
+
+## Try it out
+
+- **Code:** https://github.com/josh-huang/ML-research-agent
+- **Reproduce:** `pip install torch numpy pandas anthropic python-dotenv`, then
+  `python -m models.train --model fm --loss bce` (baseline) and
+  `python -m agent.main --fresh --max_iters 10` (autonomous run). Full setup (KuaiRand-Pure data
+  download) is in the README.

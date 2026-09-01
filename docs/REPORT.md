@@ -265,6 +265,6 @@ The full per-iteration log is in `run_logs/run_log.jsonl`; the best-so-far state
 metrics, resource accounting) is in `run_logs/state.json`; a live dashboard runs via
 `streamlit run dashboard/app.py`.
 
-The delivered run's code is pinned at commit `ec5cd5a` — the agent mutates config only, never
+The delivered run's code is pinned at commit `dcb1e6e` — the agent mutates config only, never
 code, so the commit plus each run-log `action` field together give a fully reproducible trace
 (no per-iteration code diff is needed).

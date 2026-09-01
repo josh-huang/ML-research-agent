@@ -25,6 +25,7 @@
   "converged": true,
   "iterations": 7,
   "interventions": 0,
+  "git_sha": "dcb1e6e",
   "tokens_used": 383772,
   "gpu_hours": 0.0535,
   "errors": 0,
