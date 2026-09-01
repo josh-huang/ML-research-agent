@@ -18,3 +18,10 @@ kuairand-starter-kit/kuairand-starter-kit/KuaiRand-Pure/
 # IDE
 .idea/
 .vscode/
+
+# Claude Code local state (permissions, plans — not a deliverable)
+.claude/
+
+# Scratch run artifacts (pre-run backups, ad-hoc logs)
+run_logs/backup_*/
+run_logs/full_run_*.log
