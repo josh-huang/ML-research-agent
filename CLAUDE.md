@@ -69,7 +69,7 @@ ML-research-agent/
 
 ### 交付前待办（缺口清单）
 1. README 补「团队分工」（暂移除，交付前填实际团队，非 solo）。
-2. `run_log` 补 run 起始 `git_sha` 字段（D3「code diff」可追溯）。
-3. `state` 补 token input/output 分列聚合（D4）。
-4. 新写 D1 Devpost 描述稿。
-5. 交付时刷新 README 结果表与资源用量为最终跑的数字。
+2. `run_log` 补 run 起始 `git_sha` 字段（D3「code diff」可追溯）→ 已回填 `dcb1e6e` ✓
+3. `state` 补 token input/output 分列聚合（D4）→ 需重跑才有拆分，暂接受总量 383,772。
+4. D1 Devpost 描述稿 → `docs/DEVPOST.md`（含 Try it out 链接）✓
+5. README 结果表与资源用量已核对为最终数字 ✓
