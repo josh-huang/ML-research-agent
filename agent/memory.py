@@ -48,12 +48,13 @@ def build_preamble(state, recent_tail: list[dict], lessons: str, playbook: str =
     s = state.summary()
     lines = [
         "## Current state",
-        f"- best valid primary {s['best_primary']:.4f} (iter {s['best_iter']}), "
+        f"- best valid primary {s['best_primary']:.4f} (seed-mean over "
+        f"{s['best_n_seeds']} seed(s), std {s['best_std']:.4f}; iter {s['best_iter']}), "
         f"config: {json.dumps(s['best_config'], default=float) if s['best_config'] else 'none'}",
         f"- iterations {s['iterations']} | stagnant {s['stagnant']}/3 | "
         f"converged {s['converged']}",
         f"- tokens used {s['tokens_used']} | gpu {s['gpu_hours']:.4f}h | errors {s['errors']}",
-        f"- configs tried {s['n_configs_tried']}",
+        f"- configs tried {s['n_configs_tried']} ({s['n_runs']} runs incl. extra seeds)",
     ]
     if playbook:
         lines += ["", "## Playbook (persistent prior across runs — do not re-derive)",
@@ -91,12 +92,16 @@ def lessons_digest(records: list[dict], k: int = 8) -> str:
     return "\n".join(out)
 
 
-def episode_line(hypothesis: str, cfg: dict, valid_primary: float, test_primary: float,
+def episode_line(hypothesis: str, cfg: dict, valid_primary: float,
                  verdict: str, lesson: str) -> str:
-    """One-line summary of a finished episode (the compressed working memory)."""
+    """One-line summary of a finished episode (the compressed working memory).
+
+    Valid only: this line is re-injected into the LLM context, and the test split is
+    sealed from the agent.
+    """
     cfg_s = json.dumps(cfg, sort_keys=True, default=float)
     line = (f"[episode] {hypothesis} -> config {cfg_s} -> valid primary {valid_primary:.4f} "
-            f"/ test primary {test_primary:.4f} | verdict {verdict}")
+            f"| verdict {verdict}")
     if lesson:
         line += f" | lesson: {lesson}"
     return line

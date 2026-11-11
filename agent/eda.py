@@ -10,6 +10,11 @@ Signals examined (label = long_view, 0/1):
   * watch time (play_time_ms vs duration_ms) -> censored-fraction + point-biserial corr
   * per-user impression counts + all-negative user share (bounds nDCG@5)
   * is_rand prevalence (dead in standard logs -> log_random is the unbiased-valid path)
+
+Test-split sealing: no statistic here touches test-split *labels* (or label-correlated
+outcomes such as play_time). Correlations are computed on train only; per-split label
+rates / all-negative shares cover train and valid; test contributes only its row count.
+This summary goes into the LLM system prompt, so anything computed here is agent-visible.
 """
 from __future__ import annotations
 
@@ -63,33 +68,37 @@ def compute_summary(data_dir: str) -> dict:
     label = np.where(date <= SPLITS["train"][1], "train",
                      np.where(date <= SPLITS["valid"][1], "valid", "test"))
 
-    # 1. label rate per split
+    tr = label == "train"  # label-dependent statistics use train rows only
+
+    # 1. label rate per split (test: row count only — its labels are sealed)
     splits = {}
-    for sp in ("train", "valid", "test"):
+    for sp in ("train", "valid"):
         m = label == sp
         splits[sp] = {
             "n": int(m.sum()),
             "long_view_rate": float(y[m].mean()),
         }
+    n_test = int((label == "test").sum())
 
-    # 2. binary feedback: positive rate + phi vs long_view
+    # 2. binary feedback: positive rate + phi vs long_view (train)
+    y_tr = y[tr]
     binary = []
     for c in _BINARY:
-        v = df[c].to_numpy()
+        v = df[c].to_numpy()[tr]
         binary.append({
             "name": c,
             "pos_rate": float(v.mean()),
-            "phi_long_view": round(_phi(v, y), 4),
+            "phi_long_view": round(_phi(v, y_tr), 4),
         })
     binary.sort(key=lambda d: -d["phi_long_view"])
 
-    # 3. watch time: censored fraction + point-biserial
-    pt = df["play_time_ms"].to_numpy().astype(np.float64)
-    dur = df["duration_ms"].to_numpy().astype(np.float64)
+    # 3. watch time (train): censored fraction + point-biserial
+    pt = df["play_time_ms"].to_numpy().astype(np.float64)[tr]
+    dur = df["duration_ms"].to_numpy().astype(np.float64)[tr]
     watch = {
         "play_time_median_ms": float(np.median(pt)),
         "censored_frac_full_watch": float((pt >= dur).mean()),  # watched to the end
-        "point_biserial_play_time": round(_point_biserial(pt, y), 4),
+        "point_biserial_play_time": round(_point_biserial(pt, y_tr), 4),
     }
 
     # 4. per-user impression counts + all-negative share (bounds nDCG@5)
@@ -113,7 +122,7 @@ def compute_summary(data_dir: str) -> dict:
             "p90": int(np.percentile(counts, 90)),
             "max": int(counts.max()),
         },
-        "all_negative_user_frac": {sp: round(_user_neg_frac(sp), 4) for sp in ("train", "valid", "test")},
+        "all_negative_user_frac": {sp: round(_user_neg_frac(sp), 4) for sp in ("train", "valid")},
     }
 
     # 5. is_rand prevalence (dead in standard logs)
@@ -124,6 +133,7 @@ def compute_summary(data_dir: str) -> dict:
 
     return {
         "splits": splits,
+        "n_test": n_test,
         "binary_feedback_ranked": binary,
         "watch_time": watch,
         "users": users,
@@ -137,10 +147,11 @@ def render_markdown(s: dict) -> str:
     lines = [
         f"- label: long_view; metrics GAUC+nDCG@5",
         f"- long_view rate: " + " | ".join(
-            f"{sp} {v['long_view_rate']:.3f} (n={v['n']})" for sp, v in s["splits"].items()),
-        f"- feedback phi vs long_view (ranked): " + " | ".join(
+            f"{sp} {v['long_view_rate']:.3f} (n={v['n']})" for sp, v in s["splits"].items())
+        + f" | test n={s['n_test']} (labels sealed)",
+        f"- feedback phi vs long_view (train, ranked): " + " | ".join(
             f"{d['name']}={d['phi_long_view']}({d['pos_rate']:.3f})" for d in s["binary_feedback_ranked"]),
-        f"- watch: median play {s['watch_time']['play_time_median_ms']:.0f}ms, "
+        f"- watch (train): median play {s['watch_time']['play_time_median_ms']:.0f}ms, "
         f"full-watch {s['watch_time']['censored_frac_full_watch']:.3f}, "
         f"corr(play_time,long_view)={s['watch_time']['point_biserial_play_time']}",
         f"- users: {s['users']['n_users_total']}, imp/user med {s['users']['impressions_per_user']['median']} "

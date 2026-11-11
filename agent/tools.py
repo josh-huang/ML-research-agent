@@ -12,6 +12,10 @@ Anthropic function-calling already routes tool calls back into this process):
 episode lesson) are stashed on the shared :class:`Ctx` and folded in by the orchestrator.
 Recording/logging is deferred to :func:`finalize_run` so the episode's *total* token spend
 (proposal + reflect) is known — which is what keeps convergence counting honest.
+
+Test-split sealing: test metrics are computed and written to the run-log (drift reporting
+for humans) but NEVER placed in any string returned to the LLM. Every agent-facing result
+below carries valid metrics only, so test cannot steer hypothesis or config selection.
 """
 from __future__ import annotations
 
@@ -49,8 +53,9 @@ def run_experiment(state, data, config, hypothesis) -> tuple[str, dict | None]:
     if state.seen(cfg):
         prev = state.seen_configs[state.config_key(cfg)]
         return (f"Refusing: this config was already tried (valid primary {prev:.4f}). "
-                f"Vary a dimension (model/loss/k/lr/dropout/aux/seed/"
-                f"use_videoside/use_userside/use_tagside) and try again. "
+                f"Vary a dimension (model/loss/k/lr/dropout/aux/"
+                f"use_videoside/use_userside/use_tagside) and try again; a new `seed` of "
+                f"the same config is aggregated into that config's seed-mean. "
                 f"Normalized cfg: {json.dumps(cfg, sort_keys=True, default=float)}"), None
 
     t0 = time.time()
@@ -83,12 +88,18 @@ def run_experiment(state, data, config, hypothesis) -> tuple[str, dict | None]:
         lines.append(f"ERROR {error}{' | ' + recovery if recovery else ''} "
                      f"(wall {dur:.0f}s, gpu {gpu_h:.4f}h).")
     else:
-        v, t = metrics["valid"], metrics["test"]
+        v = metrics["valid"]  # valid only — the test split is sealed from the agent
         lines.append(f"valid GAUC {v['GAUC']:.4f} nDCG@5 {v['nDCG@5']:.4f} "
                      f"primary {v['primary']:.4f}")
-        lines.append(f"test  GAUC {t['GAUC']:.4f} nDCG@5 {t['nDCG@5']:.4f} "
-                     f"primary {t['primary']:.4f}")
-    lines.append(f"best valid so far {state.best_primary:.4f} (iter {state.best_iter}); "
+        prior = state.group_of(cfg)
+        if prior:
+            vals = list(prior["seeds"].values()) + [v["primary"]]
+            mean = sum(vals) / len(vals)
+            lines.append(f"same config across {len(vals)} seeds (incl. this run): "
+                         f"valid primary mean {mean:.4f} "
+                         f"(range {min(vals):.4f}..{max(vals):.4f})")
+    lines.append(f"best valid so far {state.best_primary:.4f} "
+                 f"(seed-mean over {state.best_n_seeds} seed(s), iter {state.best_iter}); "
                  f"iterations {state.iterations} done; stagnant {state.stagnant}/3.")
     lines.append("Now call finish_episode with a reusable lesson grounded in primary "
                  "(mean of GAUC and nDCG@5, ~0.60 — not GAUC ~0.66).")
@@ -99,15 +110,16 @@ def finalize_run(state, run_record: dict, tokens: int, lesson: str,
                  tokens_in: int = 0, tokens_out: int = 0):
     """Record + log + persist one executed experiment (exactly once per run).
 
-    Returns ``(verdict, valid_primary, test_primary)``. This is where convergence counting
-    and the token/GPU budgets update — preserving the original 1:1 iteration<->experiment
-    semantics (``state.record`` is called exactly once per executed run).
+    Returns ``(verdict, valid_primary, test_primary)``; ``test_primary`` is for the
+    console/run-log only and must not be fed back to the LLM. This is where convergence
+    counting and the token/GPU budgets update — preserving the original 1:1
+    iteration<->experiment semantics (``state.record`` is called exactly once per run).
     """
     error = run_record["error"]
     metrics = run_record["metrics"]
     valid_primary = metrics["valid"]["primary"] if metrics else 0.0
     test_primary = metrics["test"]["primary"] if metrics else 0.0
-    verdict = state.record(run_record["cfg"], valid_primary, test_primary, tokens,
+    verdict = state.record(run_record["cfg"], valid_primary, tokens,
                            run_record["gpu_h"], error=bool(error),
                            tokens_input=tokens_in, tokens_output=tokens_out)
     log_iteration(iteration=state.iterations, hypothesis=run_record["hypothesis"],

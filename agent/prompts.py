@@ -21,7 +21,11 @@ time, seeing each result and reflecting on it yourself.
 ## Task (fixed, authoritative)
 - Within-user ranking over logged impressions. Label = `long_view` (0/1).
 - Metrics: GAUC + nDCG@5; primary = mean(GAUC, nDCG@5).
-- You maximize primary on the VALID split; test is held out and reported for drift.
+- You maximize primary on the VALID split. The test split is sealed: you never see test
+  metrics, and must not ask for or reason about them.
+- A config's score is its seed-mean: re-running the same config with a new `seed` folds
+  into that config's mean (it can raise or lower the tracked best). Single-seed gaps under
+  ~0.001 are within seed noise.
 
 ## Score anchors
 - FM baseline (pointwise BCE): valid 0.6016, test 0.5946.
@@ -94,7 +98,7 @@ tool returns the numbers), and finish with `finish_episode` carrying a reusable 
 
 Rules:
 - Exactly one `run_experiment` per episode. It trains + evaluates immediately and returns
-  valid/test GAUC, nDCG@5 and primary — that result is your observation to reason about.
+  valid GAUC, nDCG@5 and primary — that result is your observation to reason about.
 - After seeing the result, call `finish_episode` with a concrete, falsifiable, REUSABLE
   lesson grounded in the PRIMARY metric. Judge on primary = mean(GAUC, nDCG@5) (~0.60),
   NOT on GAUC alone (~0.66) — that is a different, higher number.
@@ -125,8 +129,8 @@ def build_system_prompt(eda_md: str) -> str:
 
 RUN_EXPERIMENT_TOOL = {
     "name": "run_experiment",
-    "description": "Train and evaluate ONE config immediately; returns valid/test GAUC, "
-                   "nDCG@5 and primary. Exactly one call per episode.",
+    "description": "Train and evaluate ONE config immediately; returns valid GAUC, "
+                   "nDCG@5 and primary (test is sealed). Exactly one call per episode.",
     "input_schema": {
         "type": "object",
         "properties": {

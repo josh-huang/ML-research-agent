@@ -87,58 +87,58 @@ def _fmt(r: dict) -> str:
 
 
 def main() -> None:
+    """Build seed-averaged members + their rank-average ensemble; submit the valid-best.
+
+    Selection discipline: every *choice* (which variant to submit, which dedup mode looks
+    good) is made on the VALID split. Test is scored exactly once, for the chosen variant,
+    and only reported — never compared across candidates.
+    """
     print(f"loading data from {DATA_DIR} ...", flush=True)
     data = load_extended(DATA_DIR)
-    rows = load(DATA_DIR)["test"]  # official (date,user_id,video_id,...) tuples
+    official = load(DATA_DIR)
+    va_rows, te_rows = official["valid"], official["test"]  # (date,user_id,video_id,...) tuples
     te_u, te_y = data["test"]["users"], data["test"]["y"]
     va_u, va_y = data["valid"]["users"], data["valid"]["y"]
 
-    member_test = []   # (name, seed-avg test_scores, test primary mean/std, valid mean)
+    members = []  # (name, seed-avg valid scores, seed-avg test scores, valid mean, valid std)
     for name, cfg in MEMBERS:
-        va_scores, te_scores = [], []
-        t_prim, v_prim = [], []
+        va_scores, te_scores, v_prim = [], [], []
         for s in SEEDS:
-            c = dict(cfg, seed=s)
-            res = run_experiment(data, c, verbose=False)
+            res = run_experiment(data, dict(cfg, seed=s), verbose=False)
             va_scores.append(res["valid_scores"])
             te_scores.append(res["test_scores"])
             v_prim.append(res["valid"]["primary"])
-            t_prim.append(res["test"]["primary"])
-            print(f"  {name:6s} seed={s}  valid {res['valid']['primary']:.4f} | "
-                  f"test {res['test']['primary']:.4f}", flush=True)
-        member_test.append((name,
-                            np.mean(te_scores, axis=0),
-                            np.mean(t_prim), np.std(t_prim),
-                            np.mean(v_prim)))
+            print(f"  {name:6s} seed={s}  valid {res['valid']['primary']:.4f}", flush=True)
+        members.append((name, np.mean(va_scores, axis=0), np.mean(te_scores, axis=0),
+                        float(np.mean(v_prim)), float(np.std(v_prim))))
 
-    print("\n=== per-model seed-averaged (5 seeds) ===")
-    for name, _, tp, tsd, vp in member_test:
-        print(f"  {name:6s}  test primary {tp:.4f} ± {tsd:.4f} | valid {vp:.4f}")
+    print(f"\n=== per-model ({len(SEEDS)} seeds), valid ===")
+    for name, va, _, vp, vsd in members:
+        print(f"  {name:6s}  valid primary per-seed {vp:.4f} ± {vsd:.4f} | "
+              f"seed-avg scores {_fmt(evaluate(va_u, va_y, va))}")
 
-    # Single-model reference (tuned DIN, seed-mean) vs the full ensemble.
-    member_te = {name: te for name, te, *_ in member_test}
-    din_metric = evaluate(te_u, te_y, member_te["din"])
-    print(f"\n[baseline] DIN seed-avg (no ensemble):      test {_fmt(din_metric)}")
+    # Candidates, each carried as (valid scores, test scores) so selection stays on valid.
+    by_name = {name: (va, te) for name, va, te, *_ in members}
+    ens_va = np.stack([rank_avg(va) for _, va, *_ in members]).mean(axis=0)
+    ens_te = np.stack([rank_avg(te) for _, _, te, *_ in members]).mean(axis=0)
+    candidates = {"din_seed_avg": by_name["din"], "ensemble_rank_avg": (ens_va, ens_te)}
 
-    # Cross-model rank-average.
-    ranked = np.stack([rank_avg(te) for _, te, *_ in member_test], axis=0)
-    ens = ranked.mean(axis=0)
-    ens_metric = evaluate(te_u, te_y, ens)
-    print(f"[ensemble] FM+DeepFM+DIN rank-avg:         test {_fmt(ens_metric)}")
-
+    print("\n=== candidates, valid ===")
+    for label, (va, _) in candidates.items():
+        print(f"  {label:18s} {_fmt(evaluate(va_u, va_y, va))}")
+    # Repeated-(user,video) dedup diagnostic, also judged on valid.
     for mode in ("mean", "max", "min"):
-        d = dedup(ens, rows, mode)
-        m = evaluate(te_u, te_y, d)
-        print(f"[ensemble] + dedup({mode:4s}):             test {_fmt(m)}")
+        m = evaluate(va_u, va_y, dedup(ens_va, va_rows, mode))
+        print(f"  ensemble+dedup({mode:4s}) {_fmt(m)}")
 
-    # Write the best-scoring variant. Empirically the DIN seed-average matches or beats the
-    # cross-model ensemble (all three models are dominated by the same user_id x video_id
-    # signal, so their errors don't decorrelate enough to add value), so submit it.
-    candidates = [("din_seed_avg", member_te["din"]), ("ensemble_rank_avg", ens)]
-    label, scores = max(candidates, key=lambda kv: evaluate(te_u, te_y, kv[1])["primary"])
-    write_submission(OUT, rows, scores)
-    print(f"\nwrote {OUT} ({len(rows):,d} rows) — {label}")
-    print(f"test {_fmt(evaluate(te_u, te_y, scores))}")
+    label = max(candidates,
+                key=lambda k: evaluate(va_u, va_y, candidates[k][0])["primary"])
+    test_scores = candidates[label][1]
+    write_submission(OUT, te_rows, test_scores)
+    print(f"\nselected on valid: {label}")
+    print(f"wrote {OUT} ({len(te_rows):,d} rows)")
+    print(f"test (reported once, not used for selection): "
+          f"{_fmt(evaluate(te_u, te_y, test_scores))}")
 
 
 if __name__ == "__main__":

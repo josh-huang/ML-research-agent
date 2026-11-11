@@ -106,10 +106,10 @@ class ReActAgent:
                 tokens_out += to
             except Exception:  # noqa: BLE001 — a run must never be orphaned
                 pass
-        verdict, vp, tp = tools.finalize_run(state, ctx.run_record, tokens, ctx.lesson,
-                                             tokens_in, tokens_out)
+        verdict, vp, _ = tools.finalize_run(state, ctx.run_record, tokens, ctx.lesson,
+                                            tokens_in, tokens_out)
         self._remember(memory.episode_line(ctx.run_record["hypothesis"],
-                                           ctx.run_record["cfg"], vp, tp,
+                                           ctx.run_record["cfg"], vp,
                                            verdict, ctx.lesson))
         r = ctx.run_record
         return EpisodeResult(hypothesis=r["hypothesis"], config=r["cfg"],

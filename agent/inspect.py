@@ -16,6 +16,10 @@ whose value is constant per user (varies only across users, not across a user's 
 within-user variance ~0 -> rank-relevance ~0 -> it cannot reorder a user's own list, so it is
 rank-irrelevant for GAUC/nDCG@5. This turns the playbook's "user-side linear term is a
 per-user constant" into something the agent can measure rather than memorise.
+
+Split discipline: every probe runs on **train-date rows only**. Probe results steer which
+features the agent pursues, so computing them on valid/test labels would leak the held-out
+splits into feature selection.
 """
 from __future__ import annotations
 
@@ -31,7 +35,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from agent.eda import _phi, _point_biserial  # noqa: E402
-from models.data_loader import LOG_FILES  # noqa: E402
+from models.data_loader import LOG_FILES, SPLITS  # noqa: E402
 
 # --- field registry ---------------------------------------------------------
 
@@ -118,8 +122,10 @@ _LIGHT_COLS = ("user_id", "video_id", "date", "time_ms", "hourmin", "tab", "is_r
 
 
 def _load_light_df(data_dir: str) -> pd.DataFrame:
+    """Light log columns, restricted to the train date range (see module docstring)."""
     parts = [pd.read_csv(os.path.join(data_dir, f), usecols=_LIGHT_COLS) for f in LOG_FILES]
-    return pd.concat(parts, ignore_index=True)
+    df = pd.concat(parts, ignore_index=True)
+    return df[df["date"] <= SPLITS["train"][1]].reset_index(drop=True)
 
 
 @dataclass
