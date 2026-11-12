@@ -109,9 +109,24 @@ episode 压缩为一行进 history（上限 20 行，防止上下文二次增长
 ### verdict 与收敛
 
 - `state.record()` 返回 `error` / `new_best` / `accept` / `reject`。
-- 任何正 delta 都会更新 best；只有 delta ≥ ε（0.002）才重置停滞计数。
+- best 按 **seed 均值**计：同一配置（去掉 `seed` 后相同）的多个 seed 合为一组，取组内均值；
+  补跑的新 seed 可能把 best 往上推，也可能往下拉。完全相同的配置（含 seed）会被拒绝重跑。
+- 每轮的提升 = 跟踪中的 best 的变化量。任何正变化都会更新 best；只有变化 ≥ ε（0.002）才重置停滞计数。
 - 连续 N=3 轮提升 < ε → `converged=True`。该标志**仅用于汇报**，不会停止循环；
   循环只在预算耗尽或达到 `--max_iters` 时停止。
+- **已确认的 best**（`confirmed_best()`）：只在跑过 ≥ 3 个 seed（`MIN_CONFIRM_SEEDS`）的配置里取
+  seed 均值最高者。最终提交和对外汇报用它；单 seed 领先无法胜出。
+
+### test 封存
+
+test 指标照常计算并写入 `run_log.jsonl`（供人看 drift），但**任何给 LLM 的内容都不含 test**：
+
+- `run_experiment` 返回、episode 一行摘要、system prompt：只有 valid。
+- EDA 摘要：标签相关统计只用 train，test 只给行数。
+- 特征探针（`inspect.py`）：只读 train 日期段。
+- 历史 lesson / hypothesis 里的 test 数字：注入前由 `memory.scrub_test_refs()` 过滤；
+  `playbook.md` 与 `run_log.jsonl` 原文保留作历史记录。
+- `models/ensemble.py`：按 valid 选方案，test 只对选中方案报告一次。
 
 ### 四层记忆（`memory.py`）
 
@@ -137,7 +152,7 @@ KuaiRand CSV ──► data_loader ──► data dict
                                        │
                                        └──► dashboard（Streamlit 实时读取）
 
-最终提交：submission/make_submission.py（BEST_CONFIG）──► submission/final.csv
+最终提交：submission/make_submission.py（state.json 的 confirmed_best）──► submission/final.csv
 ```
 
 ---
@@ -147,7 +162,7 @@ KuaiRand CSV ──► data_loader ──► data dict
 | 文件 | 内容 |
 |---|---|
 | `run_logs/run_log.jsonl` | 每轮一行：`iteration`、`git_sha`、`hypothesis`、`action`（config）、`metrics`、`verdict`、`tokens*`、`gpu_h`、`errors`、`recovery`、`lesson` |
-| `run_logs/state.json` | best、收敛状态、迭代数、`interventions`、token / GPU 用量、`seen_configs`、`elapsed_s` |
+| `run_logs/state.json` | best（seed 均值 + `best_n_seeds` / `best_std`）、`confirmed_best`、收敛状态、迭代数、`interventions`、token / GPU 用量、`seen_configs` / `seen_iters`、`elapsed_s` |
 | `run_logs/sweep_phase3d.jsonl` | Phase 3d 网格搜索结果 |
 | `submission/final.csv` | starter-kit schema 的最终提交 |
 

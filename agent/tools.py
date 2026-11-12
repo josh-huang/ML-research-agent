@@ -156,10 +156,10 @@ def _read_run_log(n: int) -> str:
         m = r.get("metrics") or {}
         vp = m.get("valid", {}).get("primary")
         lines.append(
-            f"- [{r['iteration']}] {r['hypothesis']} -> valid primary "
+            f"- [{r['iteration']}] {memory.scrub_test_refs(r['hypothesis'])} -> valid primary "
             f"{vp if vp is not None else 'err'}"
             f"{' (ERROR)' if r.get('errors') else ''} | verdict {r.get('verdict', '')}"
-            f"{' | lesson: ' + r['lesson'] if r.get('lesson') else ''}")
+            f"{' | lesson: ' + memory.scrub_test_refs(r['lesson']) if r.get('lesson') else ''}")
     return "\n".join(lines)
 
 

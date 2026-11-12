@@ -127,6 +127,13 @@ def _render():
     c2.metric("Best test primary", f"{best_test:.4f}" if best_test else "—",
               f"+{best_test - BASELINE_TEST:.4f} vs baseline" if best_test else None,
               delta_color="normal")
+    n_seeds = state.get("best_n_seeds")
+    conf = state.get("confirmed_best")
+    st.caption(
+        (f"Best valid is a seed-mean over {n_seeds} seed(s). " if n_seeds else "")
+        + (f"Confirmed best (≥3 seeds, the submitted config): valid {conf['primary']:.4f} "
+           f"± {conf['std']:.4f} over {conf['n_seeds']} seeds." if conf
+           else "No confirmed best (≥3 seeds) yet."))
     c3.metric("Iterations", state.get("iterations", 0))
     c4.metric("Tokens", f"{state.get('tokens_used', 0):,}")
     c5.metric("GPU-hours", f"{state.get('gpu_hours', 0):.3f}")

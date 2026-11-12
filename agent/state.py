@@ -8,6 +8,12 @@ Best-tracking is on the **seed-mean** of each config group (the config with ``se
 removed), not on the single luckiest run: re-running a config with a new seed folds into
 that config's mean, which can raise *or lower* the tracked best. This removes the
 winner's-curse bias of "max over single-seed runs".
+
+Two notions of best:
+- ``best_*``: highest seed-mean over all groups. Drives verdicts / convergence, so a
+  promising single-seed result still counts as progress.
+- ``confirmed_best()``: highest seed-mean among groups with >= MIN_CONFIRM_SEEDS seeds.
+  This is what gets submitted and reported — a 1-seed lead within seed noise cannot win.
 """
 from __future__ import annotations
 
@@ -29,6 +35,9 @@ N_CONVERGE = 3
 
 # seen_configs value marking a run that errored (excluded from seed groups).
 ERROR_SENTINEL = -1.0
+
+# Seeds a config needs before it can be the confirmed (submitted / reported) best.
+MIN_CONFIRM_SEEDS = 3
 
 
 class AgentState:
@@ -103,6 +112,19 @@ class AgentState:
         """Seed-aggregate stats of ``config``'s group, or None if it never ran successfully."""
         return self.groups().get(self.group_key(config))
 
+    def confirmed_best(self) -> dict | None:
+        """Best group among those with >= MIN_CONFIRM_SEEDS seeds (None if none yet).
+
+        Returns ``{primary, n_seeds, std, config}``; ``config`` carries the group's
+        lowest seed so it is directly runnable.
+        """
+        eligible = [g for g in self.groups().values() if g["n"] >= MIN_CONFIRM_SEEDS]
+        if not eligible:
+            return None
+        g = max(eligible, key=lambda x: x["mean"])
+        return {"primary": g["mean"], "n_seeds": g["n"], "std": g["std"],
+                "config": dict(g["config"], seed=min(g["seeds"]))}
+
     def _refresh_best(self) -> None:
         """Best = the config group with the highest seed-mean valid primary."""
         groups = self.groups()
@@ -175,6 +197,7 @@ class AgentState:
             "best_config": self.best_config,
             "best_n_seeds": self.best_n_seeds,
             "best_std": self.best_std,
+            "confirmed_best": self.confirmed_best(),
             "stagnant": self.stagnant,
             "converged": self.converged,
             "iterations": self.iterations,
@@ -195,6 +218,7 @@ class AgentState:
             "best_config": self.best_config,
             "best_n_seeds": self.best_n_seeds,
             "best_std": self.best_std,
+            "confirmed_best": self.confirmed_best(),
             "stagnant": self.stagnant,
             "converged": self.converged,
             "iterations": self.iterations,

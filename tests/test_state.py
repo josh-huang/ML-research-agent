@@ -105,3 +105,25 @@ def test_legacy_state_is_rederived_to_seed_mean(tmp_path, monkeypatch):
     assert st.best_primary == pytest.approx((0.6053 + 0.6045 + 0.6049) / 3)
     assert st.best_n_seeds == 3
     assert st.best_iter == -1  # unknown for legacy files without seen_iters
+
+
+def test_confirmed_best_requires_min_seeds():
+    from agent.state import MIN_CONFIRM_SEEDS
+    st = AgentState()
+    a, b = cfg(0), cfg(0, dropout=0.2)
+    rec(st, a, 0.6052)                      # 1-seed lead
+    for s, p in enumerate([0.6049, 0.6046, 0.6052][:MIN_CONFIRM_SEEDS]):
+        rec(st, dict(b, seed=s), p)
+    assert st.best_primary == pytest.approx(0.6052)       # unconfirmed lead drives verdicts
+    c = st.confirmed_best()
+    assert c["n_seeds"] == MIN_CONFIRM_SEEDS
+    assert c["config"]["dropout"] == 0.2 and c["config"]["seed"] == 0
+    assert c["primary"] == pytest.approx(0.6049)
+    assert st.to_dict()["confirmed_best"] == c
+
+
+def test_confirmed_best_none_until_enough_seeds():
+    st = AgentState()
+    rec(st, cfg(0), 0.60)
+    rec(st, cfg(1), 0.60)
+    assert st.confirmed_best() is None

@@ -120,3 +120,28 @@ def test_eda_does_not_use_test_labels(data_dir):
     md = eda.render_markdown(s)
     assert "labels sealed" in md
     assert np.isfinite(s["watch_time"]["point_biserial_play_time"])
+
+
+# --- free-text scrubbing of legacy lessons -----------------------------------
+
+@pytest.mark.parametrize("raw, expected", [
+    ("valid primary 0.6044 (test 0.5979), BELOW the anchor.",
+     "valid primary 0.6044, BELOW the anchor."),
+    ("gave 0.6052 vs 0.6053 (Δ -0.0001, flat, test 0.5985 also ~flat vs 0.5989). Saturated.",
+     "gave 0.6052 vs 0.6053 (Δ -0.0001, flat). Saturated."),
+    ("the plateau at ~0.605 valid / ~0.599 test as the ceiling.",
+     "the plateau at ~0.605 valid as the ceiling."),
+    ("seed=1 gives valid 0.6045 — a 0.0008 swing, with test primary essentially identical. Next.",
+     "seed=1 gives valid 0.6045 — a 0.0008 swing. Next."),
+    ("no test reference here; tested configs are fine.",
+     "tested configs are fine."),
+])
+def test_scrub_test_refs(raw, expected):
+    assert memory.scrub_test_refs(raw) == expected
+
+
+def test_injected_playbook_has_no_test_refs():
+    import re
+    pb = memory.load_playbook(k=1000)
+    assert pb  # the committed playbook is non-empty
+    assert not re.search(r"\btest\b", pb, re.I)

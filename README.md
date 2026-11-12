@@ -14,7 +14,10 @@ tokens / GPU-hours / human interventions.
 | oracle ceiling | 1.0000 | 0.7289 | 0.8645 | +0.2699 |
 
 `primary = mean(GAUC, nDCG@5)`, evaluated on the held-out test split by the *official*
-`evaluate.py` (imported, never modified). The gain is **variance-bounded, not a one-shot**: a
+`evaluate.py` (imported, never modified). The submitted config is selected **on valid only**
+— the confirmed best (highest seed-mean valid primary among configs run with ≥ 3 seeds:
+valid 0.6049 ± 0.0003) — and the test split is sealed from the agent, so the test numbers
+above were never used to choose anything. The gain is **variance-bounded, not a one-shot**: a
 3-seed calibration on the best config gives test primary 0.5988 / 0.5988 / 0.5990 (mean 0.5989,
 std ≈ 0.0001). The agent reproduced the baseline, explored the headroom, and converged
 **fully autonomously** — 0 human interventions, 383,772 tokens, 0.0535 GPU-hours, 0 errors, in
@@ -30,7 +33,7 @@ score but proves nothing about autonomy. We take both ends:
 
 1. **Floor (hand-built, Phase 3).** A small, verified-strong model scaffold is built by hand
    *first*, so the score never depends on the agent getting lucky. This is the `DIN(k=32)`
-   anchor — `valid 0.6053 / test 0.5988` — a real +0.0042 over baseline.
+   anchor — `valid 0.6049 (3-seed mean) / test 0.5988` — a real +0.0042 over baseline.
 2. **Autonomy (Phase 7).** The agent then runs the full closed loop on its own — reproduce →
    EDA → propose → train → evaluate → reflect → converge — and independently *confirms* the
    plateau at ~0.604, with a clean, replayable run-log.
@@ -107,6 +110,13 @@ smaller LR, else a fresh seed; one bounded retry, then record-and-move-on), a no
 proposer, and a metric-precise reflector prompt (primary = mean of GAUC & nDCG@5, not GAUC)
 to suppress metric confusion.
 
+**Evaluation discipline:** the test split is *sealed* from the agent — tool results, episode
+history, the EDA prompt block and the feature probes carry valid/train data only, and older
+lessons that quoted test numbers are scrubbed before injection (test is still logged to
+`run_log.jsonl` for human drift reporting). Best-tracking uses the **seed-mean** of each
+config, so a lucky seed cannot win; the submitted config must additionally be *confirmed*
+with ≥ 3 seeds (`AgentState.confirmed_best`).
+
 ---
 
 ## Setup & reproduce
@@ -122,7 +132,7 @@ pip install torch numpy pandas anthropic python-dotenv
 
 # 4. reproduce the baseline & our model
 python -m models.train --model fm --loss bce                 # valid ~0.6020
-python submission/make_submission.py                         # DIN(k=32) -> submission/final.csv
+python submission/make_submission.py                         # confirmed best -> submission/final.csv
 
 # 5. run the autonomous agent (reproduces baseline, then iterates until convergence)
 python -m agent.main --fresh --max_iters 10
