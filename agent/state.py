@@ -2,7 +2,10 @@
 
 Persistence model: ``run_logs/state.json`` is a single small JSON file the dashboard
 polls every tick and the agent rewrites after each iteration. All numeric metrics are
-native Python floats so they JSON-serialize cleanly.
+native Python floats so they JSON-serialize cleanly. Writes are atomic (temp file +
+``os.replace``) so a concurrent reader never sees a half-written file, and ``load`` is the
+exact inverse of ``to_dict`` so a resumed run continues every counter — including the
+active wall-clock (``elapsed_s``) and the human-intervention log.
 
 Best-tracking is on the **seed-mean** of each config group (the config with ``seed``
 removed), not on the single luckiest run: re-running a config with a new seed folds into
@@ -20,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import statistics
+import tempfile
 import time
 
 from agent.logger import LOG_DIR, git_sha
@@ -54,17 +58,28 @@ class AgentState:
         self.converged = False
         self.iterations = 0
         self.interventions = 0       # human interventions (autonomy score)
+        self.intervention_log = []   # [{"ts", "iteration", "reason"}] behind `interventions`
         self.tokens_used = 0
-        self.tokens_input = 0        # input-side tokens (input + cache-write + cache-read)
-        self.tokens_output = 0       # generated tokens
+        # input/output split; None = not recorded (legacy runs predating the split)
+        self.tokens_input: int | None = 0   # input + cache-write + cache-read
+        self.tokens_output: int | None = 0  # generated tokens
         self.git_sha = git_sha()     # run-start code commit (D3 traceability)
         self.gpu_hours = 0.0
         self.seen_configs = {}       # full config-key (incl. seed) -> valid primary
         self.seen_iters = {}         # full config-key -> iteration it ran in
         self.budget_tokens = budget_tokens
         self.budget_gpu_h = budget_gpu_h
+        # Active wall-clock: elapsed_s = now - started_at. On resume, started_at is shifted
+        # back by the persisted elapsed_s, so downtime between sessions is not counted.
         self.started_at = time.time()
         self.errors = 0
+
+    # -- human interventions ----------------------------------------------
+    def record_intervention(self, reason: str) -> None:
+        """Count one human intervention (autonomy score) with a short reason."""
+        self.interventions += 1
+        self.intervention_log.append({"ts": time.time(), "iteration": self.iterations,
+                                      "reason": str(reason)})
 
     # -- config dedup -----------------------------------------------------
     # Two keys: the *full* key (incl. seed) refuses an exact re-run; the *group* key
@@ -151,8 +166,10 @@ class AgentState:
         """
         self.iterations += 1
         self.tokens_used += tokens
-        self.tokens_input += tokens_input
-        self.tokens_output += tokens_output
+        if self.tokens_input is not None:   # keep "unknown" for legacy runs
+            self.tokens_input += tokens_input
+        if self.tokens_output is not None:
+            self.tokens_output += tokens_output
         self.gpu_hours += gpu_h
         if error:
             self.errors += 1
@@ -223,6 +240,7 @@ class AgentState:
             "converged": self.converged,
             "iterations": self.iterations,
             "interventions": self.interventions,
+            "intervention_log": self.intervention_log,
             "git_sha": self.git_sha,
             "tokens_used": self.tokens_used,
             "tokens_input": self.tokens_input,
@@ -237,33 +255,53 @@ class AgentState:
         }
 
     def save(self) -> None:
+        """Atomically rewrite state.json (temp file in the same dir + os.replace)."""
         os.makedirs(LOG_DIR, exist_ok=True)
-        with open(STATE_PATH, "w") as f:
-            json.dump(self.to_dict(), f, indent=2, default=float)
+        directory = os.path.dirname(STATE_PATH) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".state.", suffix=".tmp", dir=directory)
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(self.to_dict(), f, indent=2, default=float)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, STATE_PATH)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AgentState":
+        """Inverse of :meth:`to_dict`; tolerant of legacy files missing newer fields."""
+        st = cls()
+        st.stagnant = d.get("stagnant", 0)
+        st.converged = d.get("converged", False)
+        st.iterations = d.get("iterations", 0)
+        st.interventions = d.get("interventions", 0)
+        st.intervention_log = list(d.get("intervention_log", []))
+        st.tokens_used = d.get("tokens_used", 0)
+        # Legacy files have no split: keep it unknown (None) rather than a fake 0.
+        st.tokens_input = d.get("tokens_input")
+        st.tokens_output = d.get("tokens_output")
+        st.git_sha = d.get("git_sha", st.git_sha)
+        st.gpu_hours = d.get("gpu_hours", 0.0)
+        st.errors = d.get("errors", 0)
+        st.seen_configs = d.get("seen_configs", {})
+        st.seen_iters = d.get("seen_iters", {})
+        st.started_at = time.time() - float(d.get("elapsed_s", 0.0))
+        # Re-derive best from the seed groups (a legacy file stored the single-seed max,
+        # which the seed-mean rule replaces); fall back to the stored values if no group.
+        st.best_primary = d.get("best_primary", 0.0)
+        st.best_iter = d.get("best_iter", -1)
+        st.best_config = d.get("best_config")
+        st._refresh_best()
+        return st
 
     @classmethod
     def load(cls, **kwargs) -> "AgentState":
         if os.path.exists(STATE_PATH):
             with open(STATE_PATH) as f:
-                d = json.load(f)
-            st = cls()
-            st.best_primary = d.get("best_primary", 0.0)
-            st.best_iter = d.get("best_iter", -1)
-            st.best_config = d.get("best_config")
-            st.stagnant = d.get("stagnant", 0)
-            st.converged = d.get("converged", False)
-            st.iterations = d.get("iterations", 0)
-            st.tokens_used = d.get("tokens_used", 0)
-            st.tokens_input = d.get("tokens_input", 0)
-            st.tokens_output = d.get("tokens_output", 0)
-            st.git_sha = d.get("git_sha", st.git_sha)
-            st.gpu_hours = d.get("gpu_hours", 0.0)
-            st.errors = d.get("errors", 0)
-            st.seen_configs = d.get("seen_configs", {})
-            st.seen_iters = d.get("seen_iters", {})
-            # Re-derive best from the seed groups: a legacy state.json stored the
-            # single-seed max, which the seed-mean rule replaces.
-            st._refresh_best()
+                st = cls.from_dict(json.load(f))
             for k, v in kwargs.items():
                 setattr(st, k, v)
             return st

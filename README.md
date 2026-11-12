@@ -153,7 +153,7 @@ Feasibility is scored on **wall-clock time**, not raw GPU-hours — the organize
 | wall-clock | **339 s** (~5.6 min) | 50-iteration / 6 h cap never approached; converged in 7 iters |
 | tokens | **383,772** (input+output+cache) | system prompt cached once; thinking disabled; reflector metric-precise |
 | GPU-hours | **0.0535** | single RTX 5070 Ti; DIN trains in ~30 s |
-| human interventions | **0** | fully autonomous from baseline to convergence |
+| human interventions | **0** | fully autonomous from baseline to convergence; counted, not assumed — resuming a run auto-records one, other human actions are logged via `--intervention "reason"` (`state.json` → `intervention_log`) |
 
 The agent enforces both caps (`--max_iters`, `--budget_gpu_h`); token spend is *reported*, not
 capped, but prompt caching + disabled thinking keep it in the thousands.

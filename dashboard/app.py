@@ -41,10 +41,16 @@ def _load():
         with open(LOG) as f:
             for ln in f:
                 ln = ln.strip()
-                if ln:
+                if not ln:
+                    continue
+                try:
                     iters.append(json.loads(ln))
+                except json.JSONDecodeError:
+                    # the agent may be mid-append on the last line; pick it up next tick
+                    continue
     state = {}
     if os.path.exists(STATE):
+        # state.json is replaced atomically by the agent, so a read is always complete.
         with open(STATE) as f:
             state = json.load(f)
     return iters, state
@@ -121,7 +127,7 @@ def _render():
                 break
 
     # --- header cards ---------------------------------------------------------
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
     c1.metric("Best valid primary", f"{best_valid:.4f}",
               f"+{best_valid - BASELINE_VALID:.4f} vs baseline", delta_color="normal")
     c2.metric("Best test primary", f"{best_test:.4f}" if best_test else "—",
@@ -137,6 +143,9 @@ def _render():
     c3.metric("Iterations", state.get("iterations", 0))
     c4.metric("Tokens", f"{state.get('tokens_used', 0):,}")
     c5.metric("GPU-hours", f"{state.get('gpu_hours', 0):.3f}")
+    c7.metric("Human interventions", state.get("interventions", 0),
+              help="; ".join(e.get("reason", "") for e in state.get("intervention_log", []))
+              or "none recorded")
     c6.metric("Converged", "yes" if state.get("converged") else "no",
               f"{state.get('stagnant', 0)}/3 stagnant")
 

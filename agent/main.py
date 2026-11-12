@@ -80,19 +80,38 @@ def _fallback_run(state: AgentState, ctx: tools.Ctx, rng: random.Random) -> bool
     return run_record is not None
 
 
-def run(data_dir: str, max_iters: int, budget_tokens: int, budget_gpu_h: float,
-        use_llm: bool = True, fresh: bool = False) -> AgentState:
-    _fix_stdio_encoding()
-    from models.data_loader import load_extended  # noqa: E402  (import late: torch)
-    data = load_extended(data_dir)
-    eda_md = render_markdown(compute_summary(data_dir))
+def start_state(fresh: bool, budget_tokens: int, budget_gpu_h: float,
+                interventions: list[str] | None = None) -> AgentState:
+    """Fresh or resumed state, with human interventions recorded up front.
 
+    Resuming a run that already has iterations is itself a human action (only a person
+    restarts the agent), so it is counted as one intervention. ``interventions`` are
+    extra human actions the operator declares via ``--intervention "reason"``.
+    """
     if fresh:
         # Truncate (not delete) the previous run-log and start a fresh state.
         open(RUN_LOG_PATH, "w").close()
         state = AgentState(budget_tokens=budget_tokens, budget_gpu_h=budget_gpu_h)
     else:
         state = AgentState.load(budget_tokens=budget_tokens, budget_gpu_h=budget_gpu_h)
+        if state.iterations > 0:
+            state.record_intervention(
+                f"manual resume of an existing run at iteration {state.iterations}")
+    for reason in interventions or []:
+        state.record_intervention(reason)
+    if state.intervention_log:
+        state.save()
+    return state
+
+
+def run(data_dir: str, max_iters: int, budget_tokens: int, budget_gpu_h: float,
+        use_llm: bool = True, fresh: bool = False,
+        interventions: list[str] | None = None) -> AgentState:
+    _fix_stdio_encoding()
+    from models.data_loader import load_extended  # noqa: E402  (import late: torch)
+    data = load_extended(data_dir)
+    eda_md = render_markdown(compute_summary(data_dir))
+    state = start_state(fresh, budget_tokens, budget_gpu_h, interventions)
 
     llm, react = None, None
     if use_llm:
@@ -138,7 +157,7 @@ def run(data_dir: str, max_iters: int, budget_tokens: int, budget_gpu_h: float,
     print(f"\n=== converged={state.converged} | iterations={state.iterations} | "
           f"best valid {state.best_primary:.4f} (iter {state.best_iter}) | "
           f"tokens {state.tokens_used} | gpu {state.gpu_hours:.3f}h | "
-          f"errors {state.errors} ===", flush=True)
+          f"errors {state.errors} | interventions {state.interventions} ===", flush=True)
     return state
 
 
@@ -150,9 +169,11 @@ def main():
     ap.add_argument("--budget_gpu_h", type=float, default=0.0)
     ap.add_argument("--no_llm", action="store_true", help="uniform/mutation proposer, no API")
     ap.add_argument("--fresh", action="store_true", help="truncate run-log and start a fresh state")
+    ap.add_argument("--intervention", action="append", default=[], metavar="REASON",
+                    help="record a human intervention (repeatable), e.g. 'edited playbook'")
     a = ap.parse_args()
     run(a.data_dir, a.max_iters, a.budget_tokens, a.budget_gpu_h,
-        use_llm=not a.no_llm, fresh=a.fresh)
+        use_llm=not a.no_llm, fresh=a.fresh, interventions=a.intervention)
 
 
 if __name__ == "__main__":

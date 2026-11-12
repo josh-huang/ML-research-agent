@@ -68,7 +68,7 @@ ML-research-agent/
 | `prompts.py` | system prompt 构建 + 全部 tool schema |
 | `search.py` | 配置空间：`normalize`（补全键并截断到合法范围，保证去重可靠）、`mutate`、`random_config`、`SEED_CONFIGS` |
 | `executor.py` | 训练调用的保护层：错误分类（oom / nan / shape / syntax / runtime）+ `degrade_config` 降级重试一次 |
-| `state.py` | `AgentState`：best、收敛计数、预算、配置去重缓存，持久化为 `run_logs/state.json` |
+| `state.py` | `AgentState`：best、收敛计数、预算、配置去重缓存、人工干预记录；原子写入 `run_logs/state.json`，resume 时所有计数（含 `elapsed_s`）接续 |
 | `memory.py` | 记忆管理：episode preamble、lessons 摘要、`playbook.md` 读写 |
 | `logger.py` | 写 `run_log.jsonl`（每轮一行固定 schema）、记录 `git_sha` |
 | `eda.py` | 紧凑的数据驱动 EDA 摘要（注入 system prompt） |
@@ -162,7 +162,7 @@ KuaiRand CSV ──► data_loader ──► data dict
 | 文件 | 内容 |
 |---|---|
 | `run_logs/run_log.jsonl` | 每轮一行：`iteration`、`git_sha`、`hypothesis`、`action`（config）、`metrics`、`verdict`、`tokens*`、`gpu_h`、`errors`、`recovery`、`lesson` |
-| `run_logs/state.json` | best（seed 均值 + `best_n_seeds` / `best_std`）、`confirmed_best`、收敛状态、迭代数、`interventions`、token / GPU 用量、`seen_configs` / `seen_iters`、`elapsed_s` |
+| `run_logs/state.json` | best（seed 均值 + `best_n_seeds` / `best_std`）、`confirmed_best`、收敛状态、迭代数、`interventions`、token / GPU 用量、`seen_configs` / `seen_iters`、`elapsed_s`（累计的有效运行时长，不含两次运行之间的停机）、`intervention_log`（每次人工干预的时间 / 轮次 / 原因）；`tokens_input` / `tokens_output` 为 `null` 表示该 run 没有记录拆分 |
 | `run_logs/sweep_phase3d.jsonl` | Phase 3d 网格搜索结果 |
 | `submission/final.csv` | starter-kit schema 的最终提交 |
 
@@ -180,6 +180,12 @@ python -m models.train --model fm --loss bce
 
 ```bash
 python -m agent.main --fresh --max_iters 10
+```
+
+resume 已有的 run 会自动记 1 次人工干预；其他人工操作用 `--intervention` 登记（可重复）：
+
+```bash
+python -m agent.main --max_iters 15 --intervention "raised max_iters after review"
 ```
 
 不调用 API 的冒烟测试：

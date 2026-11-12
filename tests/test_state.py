@@ -127,3 +127,73 @@ def test_confirmed_best_none_until_enough_seeds():
     rec(st, cfg(0), 0.60)
     rec(st, cfg(1), 0.60)
     assert st.confirmed_best() is None
+
+
+# --- persistence: atomic save, resume continuity, interventions (#6) ---------
+
+@pytest.fixture
+def state_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(state_mod, "STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setattr(state_mod, "LOG_DIR", str(tmp_path))
+    return tmp_path / "state.json"
+
+
+def test_save_is_atomic_and_leaves_no_temp_files(state_path, monkeypatch):
+    st = AgentState()
+    rec(st, cfg(0), 0.60)
+    st.save()
+    good = state_path.read_text()
+    # A crash mid-write must leave the previous file intact and no temp debris.
+    def boom(*a, **k):
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(state_mod.json, "dump", boom)
+    rec(st, cfg(1), 0.61)
+    with pytest.raises(RuntimeError):
+        st.save()
+    assert state_path.read_text() == good
+    assert [p.name for p in state_path.parent.iterdir()] == ["state.json"]
+
+
+def test_resume_continues_elapsed_and_interventions(state_path):
+    st = AgentState()
+    st.started_at -= 100.0          # pretend the run has been active for 100 s
+    st.record_intervention("edited playbook")
+    st.save()
+    st2 = AgentState.load()
+    assert st2.interventions == 1
+    assert st2.intervention_log[0]["reason"] == "edited playbook"
+    assert 100.0 <= st2.to_dict()["elapsed_s"] < 105.0   # continued, not reset to 0
+
+
+def test_from_dict_roundtrips_to_dict(state_path):
+    st = AgentState()
+    rec(st, cfg(0), 0.6050)
+    rec(st, cfg(1), 0.6040)
+    st.record_intervention("x")
+    d = st.to_dict()
+    d2 = AgentState.from_dict(d).to_dict()
+    for k in d:
+        if k != "elapsed_s":
+            assert d2[k] == d[k], k
+
+
+def test_legacy_token_split_stays_unknown(state_path):
+    state_path.write_text(json.dumps({"iterations": 7, "tokens_used": 383772}))
+    st = AgentState.load()
+    assert st.tokens_input is None and st.tokens_output is None
+    rec(st, cfg(0), 0.60)           # resuming must not crash or invent a split
+    assert st.tokens_input is None
+    assert st.to_dict()["tokens_input"] is None
+
+
+def test_start_state_counts_resume_and_declared_interventions(state_path, monkeypatch, tmp_path):
+    from agent import main
+    monkeypatch.setattr(main, "RUN_LOG_PATH", str(tmp_path / "run_log.jsonl"))
+    fresh = main.start_state(True, 0, 0.0)
+    assert fresh.interventions == 0                    # a fresh start is not an intervention
+    rec(fresh, cfg(0), 0.60)
+    fresh.save()
+    resumed = main.start_state(False, 0, 0.0, ["raised max_iters"])
+    assert resumed.interventions == 2
+    assert "manual resume" in resumed.intervention_log[0]["reason"]
+    assert AgentState.load().interventions == 2        # persisted immediately
