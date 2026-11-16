@@ -175,7 +175,9 @@ FINISH_EPISODE_TOOL = {
         "type": "object",
         "properties": {
             "lesson": {"type": "string",
-                       "description": "Concrete, falsifiable, reusable lesson grounded in primary"},
+                       "description": "Concrete, falsifiable, reusable lesson grounded in "
+                                      "primary. Lead with the finding; at most 3 sentences "
+                                      "(~500 characters) — longer text is truncated."},
             "verdict": {"type": "string", "enum": ["accept", "reject"]},
         },
         "required": ["lesson"],

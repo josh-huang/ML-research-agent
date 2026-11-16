@@ -117,7 +117,15 @@ def _predict(model, split, device, use_videoside, use_userside, use_tagside,
     return np.concatenate(outs)
 
 
-def run_experiment(data, config, verbose=True):
+def run_experiment(data, config, verbose=True, time_budget_s=None):
+    """Train + evaluate one config.
+
+    ``time_budget_s`` is a cooperative wall-clock limit: it is checked after each epoch,
+    and once exceeded training stops and the best epoch so far is evaluated as usual
+    (``timed_out=True`` in the result). At least one epoch always completes.
+    """
+    t_start = time.time()
+    timed_out = False
     device = config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
     seed = config.get("seed", 0)
     torch.manual_seed(seed)
@@ -208,6 +216,11 @@ def run_experiment(data, config, verbose=True):
                 if verbose:
                     print(f"  early stop at epoch {ep}")
                 break
+        if time_budget_s and time.time() - t_start > time_budget_s:
+            timed_out = True
+            if verbose:
+                print(f"  time budget {time_budget_s:.0f}s exceeded at epoch {ep}; stopping")
+            break
 
     model.load_state_dict(best_state)
     model.eval()
@@ -222,6 +235,8 @@ def run_experiment(data, config, verbose=True):
         "test_scores": te_scores,   # raw per-row test scores (submission.csv)
         "best_valid": best,
         "epochs_run": ep,
+        "timed_out": timed_out,
+        "device": str(device),
         "config": config,
     }
 

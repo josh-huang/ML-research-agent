@@ -27,6 +27,7 @@ import tempfile
 import time
 
 from agent.logger import LOG_DIR, git_sha
+from agent.memory import playbook_sha
 
 STATE_PATH = os.path.join(LOG_DIR, "state.json")
 
@@ -63,7 +64,8 @@ class AgentState:
         # input/output split; None = not recorded (legacy runs predating the split)
         self.tokens_input: int | None = 0   # input + cache-write + cache-read
         self.tokens_output: int | None = 0  # generated tokens
-        self.git_sha = git_sha()     # run-start code commit (D3 traceability)
+        self.git_sha = git_sha()     # run-start code commit, "-dirty" if uncommitted code
+        self.playbook_sha = playbook_sha()  # run-start playbook content hash
         self.gpu_hours = 0.0
         self.seen_configs = {}       # full config-key (incl. seed) -> valid primary
         self.seen_iters = {}         # full config-key -> iteration it ran in
@@ -242,6 +244,7 @@ class AgentState:
             "interventions": self.interventions,
             "intervention_log": self.intervention_log,
             "git_sha": self.git_sha,
+            "playbook_sha": self.playbook_sha,
             "tokens_used": self.tokens_used,
             "tokens_input": self.tokens_input,
             "tokens_output": self.tokens_output,
@@ -284,6 +287,8 @@ class AgentState:
         st.tokens_input = d.get("tokens_input")
         st.tokens_output = d.get("tokens_output")
         st.git_sha = d.get("git_sha", st.git_sha)
+        # None for legacy files: the playbook at that run's start was not recorded.
+        st.playbook_sha = d.get("playbook_sha")
         st.gpu_hours = d.get("gpu_hours", 0.0)
         st.errors = d.get("errors", 0)
         st.seen_configs = d.get("seen_configs", {})

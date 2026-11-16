@@ -74,6 +74,9 @@ def run_experiment(state, data, config, hypothesis) -> tuple[str, dict | None]:
         else:
             recovery = f"{tag} FAILED"
 
+    if res.get("timed_out"):
+        recovery = (recovery + " | " if recovery else "") + "timeout->scored best epoch so far"
+
     dur = time.time() - t0
     metrics = res["metrics"]
     error = res["error"]
@@ -98,6 +101,9 @@ def run_experiment(state, data, config, hypothesis) -> tuple[str, dict | None]:
             lines.append(f"same config across {len(vals)} seeds (incl. this run): "
                          f"valid primary mean {mean:.4f} "
                          f"(range {min(vals):.4f}..{max(vals):.4f})")
+    if res.get("timed_out"):
+        lines.append("NOTE: the run hit the per-experiment time limit and was stopped early; "
+                     "the score is from its best epoch so far (it may be under-trained).")
     lines.append(f"best valid so far {state.best_primary:.4f} "
                  f"(seed-mean over {state.best_n_seeds} seed(s), iter {state.best_iter}); "
                  f"iterations {state.iterations} done; stagnant {state.stagnant}/3.")

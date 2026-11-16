@@ -11,6 +11,7 @@ and are re-injected every episode, so a fresh run starts from the frontier inste
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -56,19 +57,51 @@ def scrub_test_refs(text: str) -> str:
     return "".join(out).strip()
 
 
+LESSON_MAX_CHARS = 600  # per-lesson cap, applied on write and on injection
+
+
+def clip_lesson(text: str, limit: int = LESSON_MAX_CHARS) -> str:
+    """Bound a lesson to ``limit`` chars, cutting at a sentence end where possible.
+
+    The playbook is re-sent in every episode preamble, so unbounded lessons (legacy ones
+    run past 2,000 chars) are a per-iteration token cost. The finding leads a lesson, so
+    the head is what is kept.
+    """
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    cut = max(head.rfind(". "), head.rfind("! "), head.rfind("? "))
+    if cut >= limit // 2:
+        return head[:cut + 1]
+    return head.rsplit(" ", 1)[0].rstrip(",;:—-") + " …"
+
+
+def playbook_sha() -> str:
+    """Short content hash of the playbook file ("" if absent).
+
+    The playbook is part of the prompt but changes during a run, so the code commit
+    alone does not pin it; the hash at run start is recorded in state.json.
+    """
+    if not os.path.exists(PLAYBOOK_PATH):
+        return ""
+    with open(PLAYBOOK_PATH, "rb") as f:
+        return hashlib.sha1(f.read()).hexdigest()[:10]
+
+
 def load_playbook(k: int = PLAYBOOK_MAX_LESSONS) -> str:
     """Persistent procedural prior (survives ``--fresh``), bounded to the last ``k`` lessons."""
     if not os.path.exists(PLAYBOOK_PATH):
         return ""
     with open(PLAYBOOK_PATH, encoding="utf-8") as f:
         lessons = [ln.strip()[2:] for ln in f if ln.strip().startswith("- ")]
-    scrubbed = [scrub_test_refs(ln) for ln in lessons[-k:]]
+    scrubbed = [clip_lesson(scrub_test_refs(ln)) for ln in lessons[-k:]]
     return "\n".join(f"- {ln}" for ln in scrubbed if ln)
 
 
 def append_lesson(lesson: str) -> None:
-    """Append one lesson to the playbook (idempotent on exact text)."""
-    lesson = (lesson or "").strip()
+    """Append one lesson to the playbook (clipped; idempotent on exact text)."""
+    lesson = clip_lesson(lesson)
     if not lesson:
         return
     existing = set()
@@ -135,7 +168,7 @@ def lessons_digest(records: list[dict], k: int = 8) -> str:
     """Dedup'd latest lessons from the run-log (newest first), newest last in output."""
     seen, out = [], []
     for r in reversed(records):
-        lesson = scrub_test_refs(r.get("lesson") or "")
+        lesson = clip_lesson(scrub_test_refs(r.get("lesson") or ""))
         if lesson and lesson not in seen:
             seen.append(lesson)
             out.append(f"- {lesson}")

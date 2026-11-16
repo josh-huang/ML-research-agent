@@ -67,10 +67,10 @@ ML-research-agent/
 | `llm.py` | Claude 客户端：system prompt 缓存、关闭 thinking、返回 input/output/cache token 分列 |
 | `prompts.py` | system prompt 构建 + 全部 tool schema |
 | `search.py` | 配置空间：`normalize`（补全键并截断到合法范围，保证去重可靠）、`mutate`、`random_config`、`SEED_CONFIGS` |
-| `executor.py` | 训练调用的保护层：错误分类（oom / nan / shape / syntax / runtime）+ `degrade_config` 降级重试一次 |
+| `executor.py` | 训练调用的保护层：错误分类（oom / nan / shape / syntax / runtime）+ `degrade_config` 降级重试一次；单次实验 600s 时间上限（按 epoch 检查，超时则用已有的最佳 epoch 计分）；GPU-hours 只在 CUDA 上计，CPU 记 0 |
 | `state.py` | `AgentState`：best、收敛计数、预算、配置去重缓存、人工干预记录；原子写入 `run_logs/state.json`，resume 时所有计数（含 `elapsed_s`）接续 |
-| `memory.py` | 记忆管理：episode preamble、lessons 摘要、`playbook.md` 读写 |
-| `logger.py` | 写 `run_log.jsonl`（每轮一行固定 schema）、记录 `git_sha` |
+| `memory.py` | 记忆管理：episode preamble、lessons 摘要、`playbook.md` 读写（单条 lesson 上限 600 字符）、`playbook_sha`（run 起始时 playbook 的内容哈希，写入 `state.json`） |
+| `logger.py` | 写 `run_log.jsonl`（每轮一行固定 schema）、记录 `git_sha`（代码有未提交改动时带 `-dirty` 后缀；运行产物和 playbook 不算） |
 | `eda.py` | 紧凑的数据驱动 EDA 摘要（注入 system prompt） |
 | `inspect.py` | 只读特征探针：`list_features` / `probe_feature` / `propose_feature` |
 | `research.py` | arXiv 文献检索（`search_arxiv` / `fetch_paper`，仅用标准库） |

@@ -17,19 +17,36 @@ RUN_LOG_PATH = os.path.join(LOG_DIR, "run_log.jsonl")
 
 _GIT_SHA: str | None = None
 
+# Paths whose uncommitted changes make the recorded commit an inaccurate description of
+# the code that ran. Run artifacts (run_logs/, submission/final.csv) and the playbook —
+# which the agent itself appends to during a run — are excluded; the playbook's content
+# is pinned separately by ``memory.playbook_sha``.
+_CODE_PATHS = ["agent", "models", "submission", "dashboard", "kuairand-starter-kit",
+               ":(exclude)agent/playbook.md", ":(exclude)submission/final.csv"]
+
+
+def _git(*args: str) -> str:
+    out = subprocess.run(["git", *args], capture_output=True, text=True, timeout=5,
+                         cwd=_ROOT)
+    if out.returncode != 0:
+        raise RuntimeError(out.stderr.strip())
+    return out.stdout.strip()
+
 
 def git_sha() -> str:
-    """HEAD commit of the run's code (cached; "" if git missing / not a repo).
+    """HEAD commit of the run's code, cached at first call ("" if not a git repo).
 
-    The agent never mutates code (only config), so the commit is stable across a run;
-    recording it once makes the D3 "code diff" traceable without a per-iteration diff.
+    Suffixed with ``-dirty`` when tracked or untracked code differs from HEAD, so a
+    recorded sha never silently misdescribes the code that produced a run. The agent
+    never mutates code (only config), so one value per run makes the D3 "code diff"
+    traceable without a per-iteration diff.
     """
     global _GIT_SHA
     if _GIT_SHA is None:
         try:
-            out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                                 capture_output=True, text=True, timeout=5)
-            _GIT_SHA = out.stdout.strip()
+            sha = _git("rev-parse", "--short", "HEAD")
+            dirty = bool(_git("status", "--porcelain", "--", *_CODE_PATHS))
+            _GIT_SHA = sha + ("-dirty" if sha and dirty else "")
         except Exception:  # noqa: BLE001 — degrade to "" rather than fail the run
             _GIT_SHA = ""
     return _GIT_SHA
