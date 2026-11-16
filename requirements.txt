@@ -1,0 +1,9 @@
+# Runtime dependencies (Python >= 3.10).
+# Lower bounds only — not a lock file. Install the torch build matching your CUDA
+# version from https://pytorch.org if the default wheel does not fit your GPU.
+torch>=2.2
+numpy>=1.26
+pandas>=2.1
+anthropic>=0.49        # Messages API with prompt caching + tool use
+python-dotenv>=1.0
+streamlit>=1.37        # dashboard: st.fragment(run_every=...)

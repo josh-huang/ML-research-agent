@@ -14,7 +14,10 @@ tokens / GPU-hours / human interventions.
 | oracle ceiling | 1.0000 | 0.7289 | 0.8645 | +0.2699 |
 
 `primary = mean(GAUC, nDCG@5)`, evaluated on the held-out test split by the *official*
-`evaluate.py` (imported, never modified). The gain is **variance-bounded, not a one-shot**: a
+`evaluate.py` (imported, never modified). The submitted config is selected **on valid only**
+— the confirmed best (highest seed-mean valid primary among configs run with ≥ 3 seeds:
+valid 0.6049 ± 0.0003) — and the test split is sealed from the agent, so the test numbers
+above were never used to choose anything. The gain is **variance-bounded, not a one-shot**: a
 3-seed calibration on the best config gives test primary 0.5988 / 0.5988 / 0.5990 (mean 0.5989,
 std ≈ 0.0001). The agent reproduced the baseline, explored the headroom, and converged
 **fully autonomously** — 0 human interventions, 383,772 tokens, 0.0535 GPU-hours, 0 errors, in
@@ -30,7 +33,7 @@ score but proves nothing about autonomy. We take both ends:
 
 1. **Floor (hand-built, Phase 3).** A small, verified-strong model scaffold is built by hand
    *first*, so the score never depends on the agent getting lucky. This is the `DIN(k=32)`
-   anchor — `valid 0.6053 / test 0.5988` — a real +0.0042 over baseline.
+   anchor — `valid 0.6049 (3-seed mean) / test 0.5988` — a real +0.0042 over baseline.
 2. **Autonomy (Phase 7).** The agent then runs the full closed loop on its own — reproduce →
    EDA → propose → train → evaluate → reflect → converge — and independently *confirms* the
    plateau at ~0.604, with a clean, replayable run-log.
@@ -103,17 +106,28 @@ the record.
 
 **Robustness:** config dedup (identical keys, so an omitted field isn't a new config), error
 classification (syntax/shape/OOM/NaN), **graceful degradation** (OOM → half batch, NaN → 10×
-smaller LR, else a fresh seed; one bounded retry, then record-and-move-on), a no-LLM fallback
-proposer, and a metric-precise reflector prompt (primary = mean of GAUC & nDCG@5, not GAUC)
+smaller LR, else a fresh seed; one bounded retry, then record-and-move-on), **LLM-outage
+handling** (API calls retried with backoff; a failed episode is covered by one no-LLM
+fallback run; only 3 consecutive failures degrade to the no-LLM proposer, which re-probes
+the LLM every 3 iterations and hands control back on recovery; the cause is logged per
+iteration as `llm_error`), and a metric-precise reflector prompt (primary = mean of GAUC & nDCG@5, not GAUC)
 to suppress metric confusion.
+
+**Evaluation discipline:** the test split is *sealed* from the agent — tool results, episode
+history, the EDA prompt block and the feature probes carry valid/train data only, and older
+lessons that quoted test numbers are scrubbed before injection (test is still logged to
+`run_log.jsonl` for human drift reporting). Best-tracking uses the **seed-mean** of each
+config, so a lucky seed cannot win; the submitted config must additionally be *confirmed*
+with ≥ 3 seeds (`AgentState.confirmed_best`).
 
 ---
 
 ## Setup & reproduce
 
 ```bash
-# 1. deps
-pip install torch numpy pandas anthropic python-dotenv
+# 1. deps (Python >= 3.10)
+pip install -r requirements.txt          # runtime: agent, training, dashboard
+pip install -r requirements-dev.txt      # + pytest; then: python -m pytest -q
 
 # 2. data (KuaiRand-Pure) — see the official README
 #    wget https://zenodo.org/records/10439422/files/KuaiRand-Pure.tar.gz && tar xzf ...
@@ -122,7 +136,7 @@ pip install torch numpy pandas anthropic python-dotenv
 
 # 4. reproduce the baseline & our model
 python -m models.train --model fm --loss bce                 # valid ~0.6020
-python submission/make_submission.py                         # DIN(k=32) -> submission/final.csv
+python submission/make_submission.py                         # confirmed best -> submission/final.csv
 
 # 5. run the autonomous agent (reproduces baseline, then iterates until convergence)
 python -m agent.main --fresh --max_iters 10
@@ -143,10 +157,13 @@ Feasibility is scored on **wall-clock time**, not raw GPU-hours — the organize
 | wall-clock | **339 s** (~5.6 min) | 50-iteration / 6 h cap never approached; converged in 7 iters |
 | tokens | **383,772** (input+output+cache) | system prompt cached once; thinking disabled; reflector metric-precise |
 | GPU-hours | **0.0535** | single RTX 5070 Ti; DIN trains in ~30 s |
-| human interventions | **0** | fully autonomous from baseline to convergence |
+| human interventions | **0** | fully autonomous from baseline to convergence; counted, not assumed — resuming a run auto-records one, other human actions are logged via `--intervention "reason"` (`state.json` → `intervention_log`) |
 
-The agent enforces both caps (`--max_iters`, `--budget_gpu_h`); token spend is *reported*, not
-capped, but prompt caching + disabled thinking keep it in the thousands.
+The agent enforces three budgets: `--max_iters` (default 12), `--budget_tokens` (default
+300,000) and `--budget_gpu_h` (default 0 = no limit). The token and GPU budgets are checked
+*between* iterations, so the iteration in flight when a budget is crossed still completes and
+the final total can overshoot it. Prompt caching and disabled thinking keep per-iteration
+token cost down.
 
 ---
 
