@@ -125,8 +125,9 @@ with ≥ 3 seeds (`AgentState.confirmed_best`).
 ## Setup & reproduce
 
 ```bash
-# 1. deps
-pip install torch numpy pandas anthropic python-dotenv
+# 1. deps (Python >= 3.10)
+pip install -r requirements.txt          # runtime: agent, training, dashboard
+pip install -r requirements-dev.txt      # + pytest; then: python -m pytest -q
 
 # 2. data (KuaiRand-Pure) — see the official README
 #    wget https://zenodo.org/records/10439422/files/KuaiRand-Pure.tar.gz && tar xzf ...
@@ -158,8 +159,11 @@ Feasibility is scored on **wall-clock time**, not raw GPU-hours — the organize
 | GPU-hours | **0.0535** | single RTX 5070 Ti; DIN trains in ~30 s |
 | human interventions | **0** | fully autonomous from baseline to convergence; counted, not assumed — resuming a run auto-records one, other human actions are logged via `--intervention "reason"` (`state.json` → `intervention_log`) |
 
-The agent enforces both caps (`--max_iters`, `--budget_gpu_h`); token spend is *reported*, not
-capped, but prompt caching + disabled thinking keep it in the thousands.
+The agent enforces three budgets: `--max_iters` (default 12), `--budget_tokens` (default
+300,000) and `--budget_gpu_h` (default 0 = no limit). The token and GPU budgets are checked
+*between* iterations, so the iteration in flight when a budget is crossed still completes and
+the final total can overshoot it. Prompt caching and disabled thinking keep per-iteration
+token cost down.
 
 ---
 
