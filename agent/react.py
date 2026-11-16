@@ -33,7 +33,13 @@ class EpisodeResult:
     error: str | None = None
     recovery: str = ""
     ran: bool = False     # whether an experiment executed this episode
-    failed: bool = False  # whether the LLM itself raised (API down) — triggers no-LLM
+    failed: bool = False  # whether the LLM itself raised (after the client's retries)
+    llm_error: str = ""   # "<ExceptionType>: <message>" of that failure, for the run-log
+
+
+def _describe(exc: BaseException) -> str:
+    """Compact one-line ``Type: message`` for logs (never includes request headers/keys)."""
+    return f"{type(exc).__name__}: {' '.join(str(exc).split())}"[:300]
 
 
 def _content_to_dicts(content) -> list[dict]:
@@ -72,6 +78,7 @@ class ReActAgent:
         tokens_in = 0
         tokens_out = 0
         failed = False
+        llm_error = ""
         try:
             for _ in range(MAX_EPISODE_TURNS):
                 content, usage = self.llm.complete(messages, tools=self.tool_schemas)
@@ -89,14 +96,17 @@ class ReActAgent:
                 messages.append({"role": "user", "content": results})
                 if ctx.finish_seen:
                     break
-        except Exception:  # noqa: BLE001 — LLM/API failure; still finalize any executed run
+        except Exception as exc:  # noqa: BLE001 — LLM/API failure; still finalize any run
             failed = True
+            llm_error = _describe(exc)
+            print(f"[warn] LLM call failed: {llm_error}", flush=True)
 
         if ctx.run_record is None:
             # No experiment ran (stall or early failure). Consume no iteration; the
             # orchestrator's no-LLM fallback guarantees forward progress.
             return EpisodeResult(tokens=tokens, tokens_in=tokens_in,
-                                 tokens_out=tokens_out, failed=failed)
+                                 tokens_out=tokens_out, failed=failed,
+                                 llm_error=llm_error)
 
         if not ctx.finish_seen:
             try:
@@ -104,10 +114,12 @@ class ReActAgent:
                 tokens += ti + to
                 tokens_in += ti
                 tokens_out += to
-            except Exception:  # noqa: BLE001 — a run must never be orphaned
-                pass
+            except Exception as exc:  # noqa: BLE001 — a run must never be orphaned
+                failed = True
+                llm_error = llm_error or _describe(exc)
+                print(f"[warn] LLM call failed (forced finish): {_describe(exc)}", flush=True)
         verdict, vp, _ = tools.finalize_run(state, ctx.run_record, tokens, ctx.lesson,
-                                            tokens_in, tokens_out)
+                                            tokens_in, tokens_out, llm_error=llm_error)
         self._remember(memory.episode_line(ctx.run_record["hypothesis"],
                                            ctx.run_record["cfg"], vp,
                                            verdict, ctx.lesson))
@@ -116,7 +128,8 @@ class ReActAgent:
                              metrics=r["metrics"], verdict=verdict, lesson=ctx.lesson,
                              tokens=tokens, tokens_in=tokens_in, tokens_out=tokens_out,
                              gpu_h=r["gpu_h"], error=r["error"],
-                             recovery=r["recovery"], ran=True, failed=failed)
+                             recovery=r["recovery"], ran=True, failed=failed,
+                             llm_error=llm_error)
 
     def _force_finish(self, ctx: tools.Ctx, messages: list[dict]) -> tuple[int, int]:
         """Force finish_episode after the turn cap so an executed run is never orphaned."""

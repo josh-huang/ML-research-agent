@@ -12,6 +12,12 @@ Invoke from the project root::
 ``--no_llm`` swaps the ReAct agent for a uniform/mutation proposer so the whole loop can
 be smoke-tested (and kept running) without API spend. If the LLM raises mid-run the loop
 falls back to this path *loudly* (a warning is printed and recorded) rather than silently.
+
+LLM failure policy (:class:`LLMHealth`): transient API errors are first retried with
+backoff inside the client. An episode that still fails is covered by one fallback run (so
+the loop always advances) but the LLM stays in use; only ``LLM_FAIL_LIMIT`` consecutive
+failed episodes degrade to the no-LLM proposer, and even then the LLM is re-probed every
+``LLM_REPROBE_EVERY`` iterations so a recovered API takes the run back over.
 """
 from __future__ import annotations
 
@@ -39,6 +45,51 @@ TOOL_SCHEMAS = [prompts.SEARCH_ARXIV_TOOL, prompts.FETCH_PAPER_TOOL,
                 prompts.READ_RUN_LOG_TOOL, prompts.RUN_EXPERIMENT_TOOL,
                 prompts.FINISH_EPISODE_TOOL, prompts.LIST_FEATURES_TOOL,
                 prompts.PROBE_FEATURE_TOOL, prompts.PROPOSE_FEATURE_TOOL]
+
+
+LLM_FAIL_LIMIT = 3      # consecutive failed episodes before degrading to no-LLM
+LLM_REPROBE_EVERY = 3   # while degraded: retry the LLM every N fallback iterations
+
+
+class LLMHealth:
+    """Decides, per iteration, whether to use the LLM or the no-LLM proposer."""
+
+    def __init__(self, available: bool, fail_limit: int = LLM_FAIL_LIMIT,
+                 reprobe_every: int = LLM_REPROBE_EVERY):
+        self.available = available   # False: --no_llm or no client -> never try
+        self.fail_limit = fail_limit
+        self.reprobe_every = reprobe_every
+        self.consecutive_failures = 0
+        self.fallbacks_since_probe = 0
+
+    @property
+    def degraded(self) -> bool:
+        return self.consecutive_failures >= self.fail_limit
+
+    def should_try(self) -> bool:
+        if not self.available:
+            return False
+        if not self.degraded:
+            return True
+        return self.fallbacks_since_probe >= self.reprobe_every  # periodic re-probe
+
+    def record(self, failed: bool) -> None:
+        """Outcome of an attempted LLM episode."""
+        was_degraded = self.degraded
+        self.fallbacks_since_probe = 0
+        if not failed:
+            if was_degraded:
+                print("[info] LLM recovered; resuming the ReAct agent.", flush=True)
+            self.consecutive_failures = 0
+            return
+        self.consecutive_failures += 1
+        if self.degraded and not was_degraded:
+            print(f"[warn] {self.consecutive_failures} consecutive LLM failures; degrading "
+                  f"to the no-LLM proposer (re-probing every {self.reprobe_every} "
+                  f"iterations).", flush=True)
+
+    def record_fallback(self) -> None:
+        self.fallbacks_since_probe += 1
 
 
 def _fix_stdio_encoding() -> None:
@@ -71,13 +122,38 @@ def _propose_fallback(state: AgentState, rng: random.Random) -> tuple[str, dict]
            f"k={cfg.get('k')} lr={cfg.get('lr')}", cfg
 
 
-def _fallback_run(state: AgentState, ctx: tools.Ctx, rng: random.Random) -> bool:
-    """No-LLM path: propose via fallback, run, finalize. Returns whether a run happened."""
+def _fallback_run(state: AgentState, ctx: tools.Ctx, rng: random.Random,
+                  llm_error: str = "") -> bool:
+    """No-LLM path: propose via fallback, run, finalize. Returns whether a run happened.
+
+    ``llm_error`` is the LLM failure this run is covering for, recorded in the run-log.
+    """
     hypothesis, cfg = _propose_fallback(state, rng)
     _, run_record = tools.run_experiment(state, ctx.data, cfg, hypothesis)
     if run_record is not None:
-        tools.finalize_run(state, run_record, tokens=0, lesson="")
+        tools.finalize_run(state, run_record, tokens=0, lesson="", llm_error=llm_error)
     return run_record is not None
+
+
+def run_loop(state: AgentState, ctx: tools.Ctx, react, rng: random.Random,
+             max_iters: int, health: LLMHealth) -> None:
+    """Main iteration loop: one experiment per pass, LLM-driven when healthy."""
+    while not state.done() and state.iterations < max_iters:
+        ran, llm_error = False, ""
+        if react is not None and health.should_try():
+            try:
+                ep = react.run_episode(ctx)
+                ran, failed, llm_error = ep.ran, ep.failed, ep.llm_error
+            except Exception as e:  # noqa: BLE001 — never let an LLM bug kill the run
+                failed, llm_error = True, f"{type(e).__name__}: {e}"[:300]
+                print(f"[warn] LLM episode raised: {llm_error}", flush=True)
+            health.record(failed)
+        if not ran:
+            # Guarantees forward progress: a failed/stalled episode costs no iteration.
+            # A refused duplicate proposal runs nothing: it neither advances the
+            # iteration count nor the re-probe window.
+            if _fallback_run(state, ctx, rng, llm_error=llm_error):
+                health.record_fallback()
 
 
 def start_state(fresh: bool, budget_tokens: int, budget_gpu_h: float,
@@ -135,23 +211,8 @@ def run(data_dir: str, max_iters: int, budget_tokens: int, budget_gpu_h: float,
         if run_record is not None:
             tools.finalize_run(state, run_record, tokens=0, lesson="")
 
-    while not state.done() and state.iterations < max_iters:
-        ran = False
-        if use_llm and react is not None:
-            try:
-                ep = react.run_episode(ctx)
-                if ep.failed:
-                    print("[warn] LLM episode failed; degrading to no-LLM proposer.",
-                          flush=True)
-                    use_llm = False
-                ran = ep.ran
-            except Exception as e:  # noqa: BLE001 — never let an LLM bug kill the run
-                print(f"[warn] LLM episode raised ({e}); degrading to no-LLM proposer.",
-                      flush=True)
-                use_llm = False
-                ran = False
-        if not ran:
-            _fallback_run(state, ctx, rng)
+    run_loop(state, ctx, react, rng, max_iters,
+             LLMHealth(available=use_llm and react is not None))
 
     state.save()
     print(f"\n=== converged={state.converged} | iterations={state.iterations} | "

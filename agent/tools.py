@@ -107,7 +107,7 @@ def run_experiment(state, data, config, hypothesis) -> tuple[str, dict | None]:
 
 
 def finalize_run(state, run_record: dict, tokens: int, lesson: str,
-                 tokens_in: int = 0, tokens_out: int = 0):
+                 tokens_in: int = 0, tokens_out: int = 0, llm_error: str = ""):
     """Record + log + persist one executed experiment (exactly once per run).
 
     Returns ``(verdict, valid_primary, test_primary)``; ``test_primary`` is for the
@@ -127,7 +127,7 @@ def finalize_run(state, run_record: dict, tokens: int, lesson: str,
                   gpu_h=run_record["gpu_h"], errors=[error] if error else [],
                   verdict=verdict, duration_s=run_record["dur"],
                   recovery=run_record["recovery"], lesson=lesson,
-                  tokens_input=tokens_in, tokens_output=tokens_out)
+                  tokens_input=tokens_in, tokens_output=tokens_out, llm_error=llm_error)
     if lesson:
         memory.append_lesson(lesson)
     state.save()

@@ -28,6 +28,13 @@ MAX_TOKENS = 4096
 # would otherwise prefer those and route this agent off the user's own
 # Anthropic account. Passing api_key + base_url explicitly overrides that.
 ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+# Transient failures (connection errors, timeouts, 408/409/429, 5xx incl. 529 overloaded)
+# are retried by the SDK with exponential backoff + jitter, honouring Retry-After. The SDK
+# default is 2 retries; a long unattended run should ride out a short outage instead of
+# degrading to the no-LLM proposer, so allow more. Non-transient errors (400/401/403) are
+# never retried and surface immediately.
+MAX_RETRIES = 6
+REQUEST_TIMEOUT_S = 120.0
 
 
 def usage_tokens(usage: dict) -> int:
@@ -66,6 +73,8 @@ class ClaudeClient:
         self.client = anthropic.Anthropic(
             api_key=api_key,
             base_url=ANTHROPIC_BASE_URL,
+            max_retries=MAX_RETRIES,
+            timeout=REQUEST_TIMEOUT_S,
             default_headers=({"anthropic-workspace-id": workspace_id}
                              if workspace_id else None),
         )

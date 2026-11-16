@@ -40,7 +40,7 @@ def log_iteration(*, iteration: int, hypothesis: str, action: dict,
                   errors: list[str] | None = None, verdict: str = "",
                   duration_s: float = 0.0, recovery: str = "",
                   lesson: str = "", tokens_input: int = 0,
-                  tokens_output: int = 0) -> None:
+                  tokens_output: int = 0, llm_error: str = "") -> None:
     """Append one iteration record (native types only — no numpy scalars)."""
     os.makedirs(LOG_DIR, exist_ok=True)
     record = {
@@ -59,6 +59,9 @@ def log_iteration(*, iteration: int, hypothesis: str, action: dict,
         "errors": list(errors or []),
         "recovery": recovery or None,
         "lesson": lesson or "",
+        # LLM/API failure during this iteration's episode (None if the LLM was healthy);
+        # distinct from `errors`, which classifies the *experiment's* failure.
+        "llm_error": llm_error or None,
     }
     with open(RUN_LOG_PATH, "a") as f:
         f.write(json.dumps(record, default=float) + "\n")

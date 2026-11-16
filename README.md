@@ -106,8 +106,11 @@ the record.
 
 **Robustness:** config dedup (identical keys, so an omitted field isn't a new config), error
 classification (syntax/shape/OOM/NaN), **graceful degradation** (OOM → half batch, NaN → 10×
-smaller LR, else a fresh seed; one bounded retry, then record-and-move-on), a no-LLM fallback
-proposer, and a metric-precise reflector prompt (primary = mean of GAUC & nDCG@5, not GAUC)
+smaller LR, else a fresh seed; one bounded retry, then record-and-move-on), **LLM-outage
+handling** (API calls retried with backoff; a failed episode is covered by one no-LLM
+fallback run; only 3 consecutive failures degrade to the no-LLM proposer, which re-probes
+the LLM every 3 iterations and hands control back on recovery; the cause is logged per
+iteration as `llm_error`), and a metric-precise reflector prompt (primary = mean of GAUC & nDCG@5, not GAUC)
 to suppress metric confusion.
 
 **Evaluation discipline:** the test split is *sealed* from the agent — tool results, episode

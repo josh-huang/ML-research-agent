@@ -85,8 +85,16 @@ ML-research-agent/
  ├─ 第 0 轮：FM + BCE baseline 直接执行（不调 LLM，0 token）
  └─ while 预算未耗尽 且 iterations < max_iters:
         ReActAgent.run_episode()    每个 episode 恰好执行 1 个实验
-        LLM 异常 → 降级为 no-LLM 提议器（先跑 SEED_CONFIGS，再 mutate best）
+        LLM 失败 → 本轮由 no-LLM 提议器补跑（先跑 SEED_CONFIGS，再 mutate best）
 ```
+
+### LLM 失败策略（`main.LLMHealth`）
+
+1. **客户端重试**：连接错误、超时、429、5xx 由 SDK 指数退避重试（`llm.MAX_RETRIES = 6`）；400/401/403 不重试。
+2. **容忍偶发失败**：重试后仍失败的 episode，由 no-LLM 提议器补跑一轮保证前进，下一轮照常用 LLM。
+3. **连续 3 次失败才降级**（`LLM_FAIL_LIMIT`）为 no-LLM 提议器。
+4. **定期探测恢复**：降级期间每 3 轮（`LLM_REPROBE_EVERY`）重试一次 LLM，成功即恢复。
+5. **留痕**：失败原因写入该轮 `run_log.jsonl` 的 `llm_error` 字段（区别于实验本身的 `errors`）。
 
 ### 单个 episode（`react.py` + `tools.py`）
 
@@ -161,7 +169,7 @@ KuaiRand CSV ──► data_loader ──► data dict
 
 | 文件 | 内容 |
 |---|---|
-| `run_logs/run_log.jsonl` | 每轮一行：`iteration`、`git_sha`、`hypothesis`、`action`（config）、`metrics`、`verdict`、`tokens*`、`gpu_h`、`errors`、`recovery`、`lesson` |
+| `run_logs/run_log.jsonl` | 每轮一行：`iteration`、`git_sha`、`hypothesis`、`action`（config）、`metrics`、`verdict`、`tokens*`、`gpu_h`、`errors`、`recovery`、`lesson`、`llm_error` |
 | `run_logs/state.json` | best（seed 均值 + `best_n_seeds` / `best_std`）、`confirmed_best`、收敛状态、迭代数、`interventions`、token / GPU 用量、`seen_configs` / `seen_iters`、`elapsed_s`（累计的有效运行时长，不含两次运行之间的停机）、`intervention_log`（每次人工干预的时间 / 轮次 / 原因）；`tokens_input` / `tokens_output` 为 `null` 表示该 run 没有记录拆分 |
 | `run_logs/sweep_phase3d.jsonl` | Phase 3d 网格搜索结果 |
 | `submission/final.csv` | starter-kit schema 的最终提交 |
